@@ -135,6 +135,7 @@ Restart the app after changing env vars (`systemctl restart voxmox` in the LXC).
 
 1. Create a custom Alexa skill in the [Alexa Developer Console](https://developer.amazon.com/alexa/console/ask).
 2. Import the interaction model from `alexa/interaction-model.json` (invocation name: **vox mox**).
+   Add your real VM/LXC/node names to the `GUEST_NAME`, `NODE_NAME`, and `TARGET_NAME` custom slot types in the Alexa console (or edit the JSON before import) so recognition is reliable.
 3. Expose this app on a public HTTPS URL (Cloudflare Tunnel, Tailscale Funnel, Caddy, nginx, etc.).
 4. Set the skill endpoint to:
 

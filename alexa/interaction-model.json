@@ -41,7 +41,7 @@
           "slots": [
             {
               "name": "nodeName",
-              "type": "AMAZON.SearchQuery"
+              "type": "NODE_NAME"
             }
           ],
           "samples": [
@@ -61,7 +61,7 @@
           "slots": [
             {
               "name": "guestName",
-              "type": "AMAZON.SearchQuery"
+              "type": "GUEST_NAME"
             },
             {
               "name": "guestType",
@@ -79,7 +79,8 @@
             "how is my {guestName} container",
             "guest stats for {guestName}",
             "virtual machine stats for {guestName}",
-            "container stats for {guestName}"
+            "container stats for {guestName}",
+            "stats for {guestType} {guestName}"
           ]
         },
         {
@@ -111,7 +112,7 @@
             },
             {
               "name": "guestName",
-              "type": "AMAZON.SearchQuery"
+              "type": "GUEST_NAME"
             },
             {
               "name": "guestType",
@@ -119,14 +120,18 @@
             }
           ],
           "samples": [
-            "{action} {guestName}",
-            "{action} the {guestName}",
-            "{action} {guestType} {guestName}",
-            "{action} the {guestName} {guestType}",
-            "{action} my {guestName}",
             "please {action} {guestName}",
+            "please {action} the {guestName}",
+            "please {action} my {guestName}",
+            "please {action} {guestType} {guestName}",
+            "please {action} the {guestName} {guestType}",
             "can you {action} {guestName}",
-            "power {action} {guestName}"
+            "can you {action} the {guestName}",
+            "can you {action} my {guestName} {guestType}",
+            "power {action} {guestName}",
+            "go ahead and {action} {guestName}",
+            "I want to {action} {guestName}",
+            "tell proxmox to {action} {guestName}"
           ]
         },
         {
@@ -134,7 +139,7 @@
           "slots": [
             {
               "name": "target",
-              "type": "AMAZON.SearchQuery"
+              "type": "TARGET_NAME"
             }
           ],
           "samples": [
@@ -165,6 +170,42 @@
           "values": [
             { "name": { "value": "virtual machine", "synonyms": ["VM", "V M", "qemu", "machine"] } },
             { "name": { "value": "container", "synonyms": ["LXC", "L X C", "CT", "C T", "linux container"] } }
+          ]
+        },
+        {
+          "name": "GUEST_NAME",
+          "values": [
+            { "name": { "value": "home assistant", "synonyms": ["home-assistant", "hass", "ha"] } },
+            { "name": { "value": "docker host", "synonyms": ["docker-host", "docker"] } },
+            { "name": { "value": "windows lab", "synonyms": ["windows-lab", "windows"] } },
+            { "name": { "value": "pihole", "synonyms": ["pi hole", "pi-hole", "ad blocker"] } },
+            { "name": { "value": "nginx proxy", "synonyms": ["nginx-proxy", "nginx", "proxy"] } },
+            { "name": { "value": "backup runner", "synonyms": ["backup-runner", "backup"] } },
+            { "name": { "value": "one hundred", "synonyms": ["100", "vmid 100"] } },
+            { "name": { "value": "one oh one", "synonyms": ["101", "vmid 101"] } },
+            { "name": { "value": "two hundred", "synonyms": ["200", "vmid 200"] } }
+          ]
+        },
+        {
+          "name": "NODE_NAME",
+          "values": [
+            { "name": { "value": "pve one", "synonyms": ["pve1", "pve 1", "node one"] } },
+            { "name": { "value": "pve two", "synonyms": ["pve2", "pve 2", "node two"] } },
+            { "name": { "value": "pve", "synonyms": ["proxmox", "the node"] } }
+          ]
+        },
+        {
+          "name": "TARGET_NAME",
+          "values": [
+            { "name": { "value": "home assistant", "synonyms": ["home-assistant", "hass"] } },
+            { "name": { "value": "docker host", "synonyms": ["docker-host", "docker"] } },
+            { "name": { "value": "windows lab", "synonyms": ["windows-lab", "windows"] } },
+            { "name": { "value": "pihole", "synonyms": ["pi hole", "pi-hole"] } },
+            { "name": { "value": "nginx proxy", "synonyms": ["nginx-proxy", "nginx"] } },
+            { "name": { "value": "backup runner", "synonyms": ["backup-runner", "backup"] } },
+            { "name": { "value": "pve one", "synonyms": ["pve1", "pve 1"] } },
+            { "name": { "value": "pve two", "synonyms": ["pve2", "pve 2"] } },
+            { "name": { "value": "cluster", "synonyms": ["the cluster", "everything"] } }
           ]
         }
       ]
