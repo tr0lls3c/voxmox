@@ -207,7 +207,7 @@ async function handleGuestStats(
   return speak(
     `${speakName(guest.name)} is a ${kind} on ${speakName(guest.node)}. ` +
       `It is running. CPU is ${formatPercent(guest.cpu)} of ${guest.cpus} cores. ` +
-      `Memory is ${formatBytes(guest.mem)} of ${formatBytes(guest.maxdisk)}. ` +
+      `Memory is ${formatBytes(guest.mem)} of ${formatBytes(guest.maxmem)}. ` +
       `Disk is ${formatBytes(guest.disk)} of ${formatBytes(guest.maxdisk)}. ` +
       `Uptime is ${formatUptime(guest.uptime)}.`,
   );
