@@ -101,7 +101,7 @@ function resolvePowerAction(raw?: string): PowerAction | undefined {
 
 async function handleLaunch(): Promise<Response> {
   return speakReprompt(
-    "Welcome to ProxVoice. You can ask for cluster status, node stats, or tell me to start, stop, shutdown, or reboot a virtual machine or container.",
+    "Welcome to Voxmox. You can ask for cluster status, node stats, or tell me to start, stop, shutdown, or reboot a virtual machine or container.",
     "What would you like to do with your Proxmox cluster?",
   );
 }
@@ -313,7 +313,7 @@ export async function handleAlexaRequest(
             break;
           case "AMAZON.CancelIntent":
           case "AMAZON.StopIntent":
-            response = speak("Okay, closing ProxVoice.");
+            response = speak("Okay, closing Voxmox.");
             break;
           case "AMAZON.FallbackIntent":
             response = speakReprompt(
@@ -359,7 +359,7 @@ export async function handleAlexaRequest(
   } catch (error) {
     console.error("Alexa handler error:", error);
     response = speak(
-      "Something went wrong talking to Proxmox. Check the ProxVoice dashboard and your API token settings.",
+      "Something went wrong talking to Proxmox. Check the Voxmox dashboard and your API token settings.",
     );
   }
 
