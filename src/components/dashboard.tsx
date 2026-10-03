@@ -72,13 +72,13 @@ const SIMULATIONS = [
   },
   {
     label: "Start pihole",
-    intent: "PowerControlIntent",
-    slots: { action: "start", guestName: "pihole", guestType: "container" },
+    intent: "StartGuestIntent",
+    slots: { guestName: "pihole" },
   },
   {
     label: "Reboot docker host",
-    intent: "PowerControlIntent",
-    slots: { action: "reboot", guestName: "docker host" },
+    intent: "RebootGuestIntent",
+    slots: { guestName: "docker host" },
   },
   { label: "Performance", intent: "PerformanceIntent" },
 ] as const;
@@ -192,10 +192,21 @@ export function Dashboard() {
       /\b(start|stop|shutdown|shut down|reboot|restart|reset)\b\s+(?:the\s+)?(.+)/i,
     );
     if (powerMatch) {
-      await simulate("PowerControlIntent", {
-        action: powerMatch[1].replace("shut down", "shutdown").replace("restart", "reboot"),
-        guestName: powerMatch[2],
-      });
+      const action = powerMatch[1]
+        .toLowerCase()
+        .replace("shut down", "shutdown")
+        .replace("restart", "reboot");
+      const intent =
+        action === "start"
+          ? "StartGuestIntent"
+          : action === "stop"
+            ? "StopGuestIntent"
+            : action === "shutdown"
+              ? "ShutdownGuestIntent"
+              : action === "reboot"
+                ? "RebootGuestIntent"
+                : "ResetGuestIntent";
+      await simulate(intent, { guestName: powerMatch[2] });
       return;
     }
 
