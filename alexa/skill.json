@@ -1,0 +1,45 @@
+{
+  "manifest": {
+    "publishingInformation": {
+      "locales": {
+        "en-US": {
+          "name": "ProxVoice",
+          "summary": "Control and monitor your Proxmox cluster with your voice.",
+          "description": "ProxVoice lets you ask Alexa for Proxmox node, VM, and LXC status, check performance, and start, stop, shut down, reboot, or reset guests.",
+          "examplePhrases": [
+            "Alexa, open Prox Voice",
+            "Alexa, ask Prox Voice for cluster status",
+            "Alexa, ask Prox Voice to start docker host"
+          ],
+          "keywords": ["proxmox", "homelab", "virtualization", "server"]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "distributionCountries": ["US", "CA", "GB", "AU"],
+      "testingInstructions": "Use a Proxmox API token configured on the skill endpoint host. Demo mode works without a live cluster."
+    },
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "https://YOUR_PUBLIC_HTTPS_HOST/api/alexa",
+          "sslCertificateType": "Wildcard"
+        },
+        "interfaces": []
+      }
+    },
+    "manifestVersion": "1.0",
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "usesPersonalInfo": false,
+      "isChildDirected": false,
+      "isExportCompliant": true,
+      "containsAds": false,
+      "locales": {
+        "en-US": {
+          "privacyPolicyUrl": "https://example.com/privacy",
+          "termsOfUseUrl": "https://example.com/terms"
+        }
+      }
+    }
+  }
+}

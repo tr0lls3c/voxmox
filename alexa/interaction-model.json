@@ -1,0 +1,173 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "prox voice",
+      "intents": [
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "ClusterStatusIntent",
+          "slots": [],
+          "samples": [
+            "cluster status",
+            "status of my cluster",
+            "how is my cluster",
+            "proxmox status",
+            "what's running",
+            "give me a cluster overview",
+            "cluster overview"
+          ]
+        },
+        {
+          "name": "NodeStatsIntent",
+          "slots": [
+            {
+              "name": "nodeName",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "node stats",
+            "node status",
+            "how are the nodes",
+            "stats for node {nodeName}",
+            "status of node {nodeName}",
+            "how is node {nodeName}",
+            "check node {nodeName}",
+            "node {nodeName} stats",
+            "tell me about node {nodeName}"
+          ]
+        },
+        {
+          "name": "GuestStatsIntent",
+          "slots": [
+            {
+              "name": "guestName",
+              "type": "AMAZON.SearchQuery"
+            },
+            {
+              "name": "guestType",
+              "type": "GUEST_TYPE"
+            }
+          ],
+          "samples": [
+            "stats for {guestName}",
+            "status of {guestName}",
+            "how is {guestName}",
+            "check {guestName}",
+            "stats for the {guestName} {guestType}",
+            "status of {guestType} {guestName}",
+            "how is my {guestName} virtual machine",
+            "how is my {guestName} container",
+            "guest stats for {guestName}",
+            "virtual machine stats for {guestName}",
+            "container stats for {guestName}"
+          ]
+        },
+        {
+          "name": "ListGuestsIntent",
+          "slots": [
+            {
+              "name": "guestType",
+              "type": "GUEST_TYPE"
+            }
+          ],
+          "samples": [
+            "list guests",
+            "list virtual machines",
+            "list containers",
+            "list my {guestType}",
+            "what {guestType} do I have",
+            "show running virtual machines",
+            "show my containers",
+            "what VMs are running",
+            "what LXCs are running"
+          ]
+        },
+        {
+          "name": "PowerControlIntent",
+          "slots": [
+            {
+              "name": "action",
+              "type": "POWER_ACTION"
+            },
+            {
+              "name": "guestName",
+              "type": "AMAZON.SearchQuery"
+            },
+            {
+              "name": "guestType",
+              "type": "GUEST_TYPE"
+            }
+          ],
+          "samples": [
+            "{action} {guestName}",
+            "{action} the {guestName}",
+            "{action} {guestType} {guestName}",
+            "{action} the {guestName} {guestType}",
+            "{action} my {guestName}",
+            "please {action} {guestName}",
+            "can you {action} {guestName}",
+            "power {action} {guestName}"
+          ]
+        },
+        {
+          "name": "PerformanceIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "performance",
+            "performance stats",
+            "cluster performance",
+            "who is using the most CPU",
+            "performance for {target}",
+            "how hard is {target} working",
+            "CPU usage for {target}",
+            "resource usage for {target}"
+          ]
+        }
+      ],
+      "types": [
+        {
+          "name": "POWER_ACTION",
+          "values": [
+            { "name": { "value": "start", "synonyms": ["boot", "power on", "turn on"] } },
+            { "name": { "value": "stop", "synonyms": ["force stop", "kill", "hard stop"] } },
+            { "name": { "value": "shutdown", "synonyms": ["shut down", "power off", "turn off", "graceful stop"] } },
+            { "name": { "value": "reboot", "synonyms": ["restart", "soft reboot"] } },
+            { "name": { "value": "reset", "synonyms": ["hard reset", "force reboot"] } }
+          ]
+        },
+        {
+          "name": "GUEST_TYPE",
+          "values": [
+            { "name": { "value": "virtual machine", "synonyms": ["VM", "V M", "qemu", "machine"] } },
+            { "name": { "value": "container", "synonyms": ["LXC", "L X C", "CT", "C T", "linux container"] } }
+          ]
+        }
+      ]
+    }
+  }
+}
