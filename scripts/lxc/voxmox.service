@@ -1,0 +1,25 @@
+[Unit]
+Description=Voxmox Alexa + Proxmox dashboard
+Documentation=https://github.com/tr0lls3c/voxmox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_DIR__
+Environment=NODE_ENV=production
+Environment=PORT=__APP_PORT__
+Environment=HOSTNAME=0.0.0.0
+EnvironmentFile=-__APP_DIR__/.env
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+LimitNOFILE=65535
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
