@@ -1,1 +1,1 @@
-file:///tmp/content_for_mcp.txt
+@/workspace/src/components/servers-setup.tsx
