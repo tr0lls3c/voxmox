@@ -46,7 +46,7 @@ export async function POST(request: Request) {
 export async function GET() {
   return Response.json({
     ok: true,
-    skill: "ProxVoice",
+    skill: "Voxmox",
     endpoint: "/api/alexa",
     hint: "POST Alexa RequestEnvelope JSON here.",
   });

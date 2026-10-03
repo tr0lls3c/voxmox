@@ -3,13 +3,13 @@
     "publishingInformation": {
       "locales": {
         "en-US": {
-          "name": "ProxVoice",
+          "name": "Voxmox",
           "summary": "Control and monitor your Proxmox cluster with your voice.",
-          "description": "ProxVoice lets you ask Alexa for Proxmox node, VM, and LXC status, check performance, and start, stop, shut down, reboot, or reset guests.",
+          "description": "Voxmox lets you ask Alexa for Proxmox node, VM, and LXC status, check performance, and start, stop, shut down, reboot, or reset guests.",
           "examplePhrases": [
-            "Alexa, open Prox Voice",
-            "Alexa, ask Prox Voice for cluster status",
-            "Alexa, ask Prox Voice to start docker host"
+            "Alexa, open vox mox",
+            "Alexa, ask vox mox for cluster status",
+            "Alexa, ask vox mox to start docker host"
           ],
           "keywords": ["proxmox", "homelab", "virtualization", "server"]
         }

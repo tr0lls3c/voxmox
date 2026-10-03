@@ -19,7 +19,7 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ProxVoice — Proxmox Alexa Control",
+  title: "Voxmox — Proxmox Alexa Control",
   description:
     "Alexa skill and dashboard for monitoring and controlling a Proxmox cluster.",
 };

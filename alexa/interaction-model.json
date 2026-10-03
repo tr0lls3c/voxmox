@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "prox voice",
+      "invocationName": "vox mox",
       "intents": [
         {
           "name": "AMAZON.CancelIntent",
