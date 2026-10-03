@@ -1,0 +1,1 @@
+cursor:file:///workspace/package-lock.json
