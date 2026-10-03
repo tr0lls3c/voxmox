@@ -12,6 +12,7 @@ Alexa skill + web dashboard for managing a Proxmox cluster: node/VM/LXC status, 
 - **Performance summary** — busiest node/guest, or per-target usage
 - **Demo mode** — works without a live Proxmox host so you can try the skill handler immediately
 - **Dashboard** — same backend as Alexa, with an utterance simulator
+- **Server management** — add, edit, remove, and switch Proxmox API endpoints from the Setup tab
 
 ## Quick start (dev)
 
@@ -27,6 +28,8 @@ The web UI listens on **all interfaces** (`0.0.0.0:43127`). Open it at:
 - Another device on your network: `http://<this-host-ip>:43127`
 
 Without Proxmox credentials, the app serves a sample two-node cluster so the dashboard and Alexa simulator work out of the box.
+
+In the **Setup** tab you can add live Proxmox servers (API URL + API token). Credentials are saved under `data/servers.json` on the host and are preferred over `.env` values.
 
 ## Publish to GitHub (one-time)
 
@@ -113,6 +116,17 @@ Point Alexa at `https://YOUR_PUBLIC_HTTPS_HOST/api/alexa` (tunnel/proxy the CT I
 
 ## Connect a real Proxmox cluster
 
+### From the web UI (recommended)
+
+1. Open the dashboard → **Setup**.
+2. Click **Add server**, enter a name, API URL (`https://your-host:8006`), token ID, and token secret.
+3. Use **Test connection**, then save. Mark the server active (or click **Use** later).
+4. Edit or remove servers anytime from the same tab. Secrets are never returned to the browser after save.
+
+Saved servers live in `data/servers.json` (or `$VOXMOX_DATA_DIR`). LXC `update` preserves that folder.
+
+### From environment variables (fallback)
+
 1. In Proxmox, create an API token (Datacenter → Permissions → API Tokens).
 2. Grant the token permission to read cluster/node status and manage guests. A typical least-privilege set:
    - Path `/` or `/nodes`: `Sys.Audit` (node stats)
@@ -131,7 +145,7 @@ PROXMOX_TOKEN_SECRET=your-secret
 NODE_TLS_REJECT_UNAUTHORIZED=0
 ```
 
-Restart the app after changing env vars (`systemctl restart voxmox` in the LXC).
+Restart the app after changing env vars (`systemctl restart voxmox` in the LXC). Env credentials are used only when no enabled saved server is active.
 
 ## Alexa skill setup
 
@@ -165,12 +179,19 @@ https://YOUR_PUBLIC_HOST/api/alexa
 | `POST /api/alexa/simulate` | Dashboard simulator (`{ intent, slots }`) |
 | `GET /api/cluster` | Cluster overview JSON |
 | `POST /api/power` | Power action (`{ vmid\|name, type?, action }`) |
+| `GET /api/servers` | List saved Proxmox servers (secrets redacted) |
+| `POST /api/servers` | Add a server |
+| `PATCH /api/servers/:id` | Edit a server (omit `tokenSecret` to keep it) |
+| `DELETE /api/servers/:id` | Remove a server |
+| `POST /api/servers/:id/activate` | Make a server active |
+| `POST /api/servers/test` | Test credentials (`serverId` or host/token fields) |
 
 ## Security notes
 
 - Run this service on a host that can reach your Proxmox API; do not expose Proxmox itself publicly.
 - Prefer a least-privilege API token over `root@pam`.
 - Production requests to `/api/alexa` verify Amazon’s signature headers (skipped automatically in development).
+- Tokens saved in the Setup UI are written to `data/servers.json` with mode `0600`. Keep that path off shared/public storage and out of git.
 - The dashboard power buttons can change guest state — treat the public URL like any privileged control plane.
 
 ## Scripts
