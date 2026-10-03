@@ -152,8 +152,10 @@ For a private GitHub repo (classic PAT with repo scope):
     --exclude .next \
     --exclude .env \
     --exclude .env.local \
+    --exclude data \
     "$TMP/src/" "$APP_DIR/"
 
+  mkdir -p "$APP_DIR/data"
   chown -R "$APP_USER:$APP_USER" "$APP_DIR"
   msg_ok "Application files updated"
 }
