@@ -21,6 +21,36 @@ export interface ProxmoxConfig {
   mock: boolean;
 }
 
+interface NodeStatusApi {
+  uptime?: number;
+  cpu?: number;
+  mem?: number;
+  maxmem?: number;
+  memory?: {
+    used?: number;
+    free?: number;
+    total?: number;
+  };
+  loadavg?: [string, string, string];
+  cpuinfo?: {
+    cpus?: number;
+  };
+}
+
+interface NodeGuestListItem {
+  vmid: number;
+  name?: string;
+  status?: string;
+  cpus?: number;
+  cpu?: number;
+  mem?: number;
+  maxmem?: number;
+  disk?: number;
+  maxdisk?: number;
+  uptime?: number;
+  template?: number;
+}
+
 function envFlag(name: string, fallback = false): boolean {
   const value = process.env[name];
   if (value == null || value === "") return fallback;
@@ -76,7 +106,6 @@ async function proxmoxFetch<T>(
     `PVEAPIToken=${config.tokenId}=${config.tokenSecret}`,
   );
 
-  // Node's undici respects NODE_TLS_REJECT_UNAUTHORIZED; document in README.
   const response = await fetch(url, {
     ...init,
     headers,
@@ -117,15 +146,29 @@ function resourceToGuest(resource: ClusterResource): GuestStatus | null {
 }
 
 function resourceToNode(resource: ClusterResource): NodeStatus | null {
-  if (resource.type !== "node" || !resource.node) return null;
+  if (resource.type !== "node") return null;
+  const node = resource.node ?? resource.id?.replace(/^node\//, "");
+  if (!node) return null;
+
   return {
-    node: resource.node,
+    node,
     status: resource.status ?? "unknown",
     cpu: resource.cpu ?? 0,
-    maxcpu: resource.maxcpu ?? 1,
+    maxcpu: resource.maxcpu ?? 0,
     mem: resource.mem ?? 0,
     maxmem: resource.maxmem ?? 0,
     uptime: resource.uptime ?? 0,
+  };
+}
+
+function summarize(nodes: NodeStatus[], guests: GuestStatus[]) {
+  return {
+    nodeCount: nodes.length,
+    onlineNodes: nodes.filter((n) => n.status === "online").length,
+    vmCount: guests.filter((g) => g.type === "qemu").length,
+    lxcCount: guests.filter((g) => g.type === "lxc").length,
+    runningGuests: guests.filter((g) => g.status === "running").length,
+    stoppedGuests: guests.filter((g) => g.status !== "running").length,
   };
 }
 
@@ -147,21 +190,124 @@ function buildOverview(
     mode,
     nodes,
     guests,
-    summary: {
-      nodeCount: nodes.length,
-      onlineNodes: nodes.filter((n) => n.status === "online").length,
-      vmCount: guests.filter((g) => g.type === "qemu").length,
-      lxcCount: guests.filter((g) => g.type === "lxc").length,
-      runningGuests: guests.filter((g) => g.status === "running").length,
-      stoppedGuests: guests.filter((g) => g.status !== "running").length,
-    },
+    summary: summarize(nodes, guests),
   };
+}
+
+function nodeNeedsEnrichment(node: NodeStatus): boolean {
+  return (
+    node.maxmem <= 0 ||
+    node.maxcpu <= 0 ||
+    (node.status === "online" && node.uptime <= 0 && node.mem <= 0)
+  );
+}
+
+async function enrichNode(
+  config: ProxmoxConfig,
+  node: NodeStatus,
+): Promise<NodeStatus> {
+  if (!nodeNeedsEnrichment(node)) return node;
+
+  try {
+    const status = await proxmoxFetch<NodeStatusApi>(
+      config,
+      `/nodes/${encodeURIComponent(node.node)}/status`,
+    );
+
+    return {
+      ...node,
+      status: node.status === "unknown" ? "online" : node.status,
+      cpu: status.cpu ?? node.cpu,
+      maxcpu: status.cpuinfo?.cpus || node.maxcpu || 1,
+      mem: status.memory?.used ?? status.mem ?? node.mem,
+      maxmem: status.memory?.total ?? status.maxmem ?? node.maxmem,
+      uptime: status.uptime ?? node.uptime,
+      loadavg: status.loadavg ?? node.loadavg,
+    };
+  } catch (error) {
+    console.warn(`Failed to enrich node ${node.node}:`, error);
+    return {
+      ...node,
+      maxcpu: node.maxcpu || 1,
+    };
+  }
+}
+
+async function listGuestsOnNode(
+  config: ProxmoxConfig,
+  node: string,
+  type: GuestType,
+): Promise<GuestStatus[]> {
+  try {
+    const items = await proxmoxFetch<NodeGuestListItem[]>(
+      config,
+      `/nodes/${encodeURIComponent(node)}/${type}`,
+    );
+
+    return items
+      .filter((item) => item.template !== 1)
+      .map((item) => ({
+        vmid: item.vmid,
+        name: item.name ?? `${type}-${item.vmid}`,
+        type,
+        node,
+        status: item.status ?? "unknown",
+        cpu: item.cpu ?? 0,
+        cpus: item.cpus ?? 1,
+        mem: item.mem ?? 0,
+        maxmem: item.maxmem ?? 0,
+        disk: item.disk ?? 0,
+        maxdisk: item.maxdisk ?? 0,
+        uptime: item.uptime ?? 0,
+      }));
+  } catch (error) {
+    console.warn(`Failed to list ${type} on ${node}:`, error);
+    return [];
+  }
+}
+
+async function discoverGuests(
+  config: ProxmoxConfig,
+  nodes: NodeStatus[],
+): Promise<GuestStatus[]> {
+  const lists = await Promise.all(
+    nodes.flatMap((node) => [
+      listGuestsOnNode(config, node.node, "qemu"),
+      listGuestsOnNode(config, node.node, "lxc"),
+    ]),
+  );
+
+  return lists.flat().sort((a, b) => a.vmid - b.vmid);
+}
+
+function mergeGuests(
+  primary: GuestStatus[],
+  secondary: GuestStatus[],
+): GuestStatus[] {
+  const byKey = new Map<string, GuestStatus>();
+  for (const guest of [...secondary, ...primary]) {
+    byKey.set(`${guest.type}:${guest.vmid}`, guest);
+  }
+  return [...byKey.values()].sort((a, b) => a.vmid - b.vmid);
 }
 
 export async function listResources(): Promise<ClusterResource[]> {
   const config = getProxmoxConfig();
   if (config.mock) return getMockResources();
-  return proxmoxFetch<ClusterResource[]>(config, "/cluster/resources");
+
+  // Fetch untyped + vm-typed views; some tokens populate one more completely.
+  const [all, vms] = await Promise.all([
+    proxmoxFetch<ClusterResource[]>(config, "/cluster/resources"),
+    proxmoxFetch<ClusterResource[]>(config, "/cluster/resources?type=vm").catch(
+      () => [] as ClusterResource[],
+    ),
+  ]);
+
+  const byId = new Map<string, ClusterResource>();
+  for (const resource of [...all, ...vms]) {
+    byId.set(resource.id, { ...byId.get(resource.id), ...resource });
+  }
+  return [...byId.values()];
 }
 
 export async function getClusterOverview(): Promise<ClusterOverview> {
@@ -169,7 +315,24 @@ export async function getClusterOverview(): Promise<ClusterOverview> {
   if (config.mock) return getMockOverview();
 
   const resources = await listResources();
-  return buildOverview(resources, "live");
+  let overview = buildOverview(resources, "live");
+
+  const nodes = await Promise.all(
+    overview.nodes.map((node) => enrichNode(config, node)),
+  );
+
+  let guests = overview.guests;
+  // Always merge per-node guest discovery so we don't miss VMs/LXCs that
+  // /cluster/resources omits for the API token.
+  const discovered = await discoverGuests(config, nodes);
+  guests = mergeGuests(guests, discovered);
+
+  return {
+    mode: "live",
+    nodes,
+    guests,
+    summary: summarize(nodes, guests),
+  };
 }
 
 export async function getNodeStatus(nodeName: string): Promise<NodeStatus | null> {
@@ -206,7 +369,6 @@ export async function findGuest(
   );
   if (partial.length === 1) return partial[0];
 
-  // Prefer higher fuzzy score
   let best: GuestStatus | null = null;
   let bestScore = 0;
   for (const guest of guests) {

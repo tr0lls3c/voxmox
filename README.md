@@ -114,7 +114,9 @@ Point Alexa at `https://YOUR_PUBLIC_HTTPS_HOST/api/alexa` (tunnel/proxy the CT I
 ## Connect a real Proxmox cluster
 
 1. In Proxmox, create an API token (Datacenter → Permissions → API Tokens).
-2. Grant the token permission to audit resources and manage VM/LXC power state (for example `VM.Audit`, `VM.PowerMgmt`, and path access under `/vms` and `/nodes`).
+2. Grant the token permission to read cluster/node status and manage guests. A typical least-privilege set:
+   - Path `/` or `/nodes`: `Sys.Audit` (node stats)
+   - Path `/vms`: `VM.Audit`, `VM.PowerMgmt` (list guests + power actions)
 3. Set in `.env.local` (dev) or `/opt/voxmox/.env` (LXC):
 
 ```env
