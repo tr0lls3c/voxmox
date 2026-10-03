@@ -1,0 +1,257 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# ProxVoice / voxmox updater
+# Installed as /usr/bin/update inside the LXC (community-scripts style).
+# Usage (as root inside the CT):
+#   update
+#   update --set-url 'https://github.com/tr0lls3c/voxmox.git'
+#   update --set-url 'https://ghp_xxx@github.com/tr0lls3c/voxmox.git'   # private repo PAT
+# ==============================================================================
+set -euo pipefail
+
+APP="ProxVoice"
+APP_DIR="${APP_DIR:-/opt/proxvoice}"
+APP_USER="${APP_USER:-proxvoice}"
+CONF_DIR="/etc/proxvoice"
+CONF_FILE="${CONF_DIR}/update.conf"
+SERVICE_NAME="proxvoice"
+DEFAULT_GIT_URL="https://github.com/tr0lls3c/voxmox.git"
+
+YW=$'\033[33m'
+BL=$'\033[36m'
+GN=$'\033[1;92m'
+RD=$'\033[01;31m'
+CL=$'\033[m'
+BOLD=$'\033[1m'
+
+msg_info() { echo -e " ${BOLD}${YW}➜${CL}  $1"; }
+msg_ok() { echo -e " ${BOLD}${GN}✔${CL}  $1"; }
+msg_error() { echo -e " ${BOLD}${RD}✖${CL}  $1"; }
+header_info() {
+  clear
+  cat <<"EOF"
+  ____                __     __        _
+ |  _ \ _ __ _____  __\ \   / /__  _  (_) ___ ___
+ | |_) | '__/ _ \ \/ / \ \ / / _ \| | | |/ __/ _ \\
+ |  __/| | | (_) >  <   \ V / (_) | |_| | (_|  __/
+ |_|   |_|  \___/_/\\_\   \_/ \___/ \__,_|\___\___|
+EOF
+  echo -e "  ${BL}${APP} updater${CL}\n"
+}
+
+die() {
+  msg_error "$1"
+  exit 1
+}
+
+load_conf() {
+  GIT_URL="${PROXVOICE_GIT_URL:-}"
+  GIT_BRANCH="${GIT_BRANCH:-main}"
+  NODE_MAJOR="${NODE_MAJOR:-22}"
+
+  if [[ -f "$CONF_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$CONF_FILE"
+  fi
+
+  [[ -n "${PROXVOICE_GIT_URL:-}" ]] && GIT_URL="$PROXVOICE_GIT_URL"
+  [[ -n "${GIT_BRANCH_OVERRIDE:-}" ]] && GIT_BRANCH="$GIT_BRANCH_OVERRIDE"
+
+  # Sensible default for public GitHub installs.
+  if [[ -z "${GIT_URL:-}" ]]; then
+    GIT_URL="$DEFAULT_GIT_URL"
+  fi
+}
+
+save_conf() {
+  mkdir -p "$CONF_DIR"
+  cat >"$CONF_FILE" <<EOF
+# ProxVoice update configuration (chmod 600)
+# Generated/updated by /usr/bin/update
+GIT_URL='${GIT_URL}'
+GIT_BRANCH='${GIT_BRANCH}'
+APP_DIR='${APP_DIR}'
+APP_USER='${APP_USER}'
+NODE_MAJOR='${NODE_MAJOR:-22}'
+EOF
+  chmod 600 "$CONF_FILE"
+}
+
+ensure_root() {
+  [[ $EUID -eq 0 ]] || die "Run update as root inside the ProxVoice LXC."
+}
+
+ensure_install() {
+  if [[ ! -d "$APP_DIR" || ! -f "$APP_DIR/package.json" ]]; then
+    die "No ${APP} installation found in ${APP_DIR}."
+  fi
+  if ! systemctl list-unit-files "${SERVICE_NAME}.service" &>/dev/null; then
+    die "systemd unit ${SERVICE_NAME}.service not found."
+  fi
+}
+
+cmd_set_url() {
+  local url="${1:-}"
+  [[ -n "$url" ]] || die "Usage: update --set-url '<git-clone-url>'"
+  load_conf
+  GIT_URL="$url"
+  save_conf
+  msg_ok "Saved update URL to ${CONF_FILE}"
+  exit 0
+}
+
+ensure_nodejs() {
+  if command -v node >/dev/null 2>&1; then
+    local major
+    major="$(node -v | sed -E 's/^v([0-9]+).*/\1/')"
+    if [[ "$major" -ge "${NODE_MAJOR:-22}" ]]; then
+      return
+    fi
+  fi
+  msg_info "Updating Node.js to ${NODE_MAJOR}.x"
+  export DEBIAN_FRONTEND=noninteractive
+  curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash -
+  apt-get install -y nodejs
+  msg_ok "Node.js $(node -v)"
+}
+
+update_os_packages() {
+  msg_info "Updating OS packages"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y >/dev/null
+  apt-get -y upgrade >/dev/null
+  apt-get install -y --no-install-recommends git rsync curl ca-certificates >/dev/null
+  msg_ok "Updated OS packages"
+}
+
+fetch_latest() {
+  [[ -n "${GIT_URL:-}" ]] || die "No git URL configured. Run: update --set-url 'https://github.com/tr0lls3c/voxmox.git'"
+
+  msg_info "Fetching ${APP} (${GIT_BRANCH}) from git"
+  TMP="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$TMP'" EXIT
+
+  if ! git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_URL" "$TMP/src" 2>"$TMP/clone.err"; then
+    echo
+    cat "$TMP/clone.err" >&2 || true
+    echo
+    die "Git clone failed.
+
+For a public GitHub repo:
+  update --set-url 'https://github.com/tr0lls3c/voxmox.git'
+
+For a private GitHub repo (classic PAT with repo scope):
+  update --set-url 'https://ghp_YOUR_PAT@github.com/tr0lls3c/voxmox.git'"
+  fi
+
+  rm -rf "$TMP/src/.git"
+
+  rsync -a --delete \
+    --exclude node_modules \
+    --exclude .next \
+    --exclude .env \
+    --exclude .env.local \
+    "$TMP/src/" "$APP_DIR/"
+
+  chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+  msg_ok "Application files updated"
+}
+
+install_deps_and_build() {
+  msg_info "Installing npm dependencies"
+  cd "$APP_DIR"
+  if [[ -f package-lock.json ]]; then
+    runuser -u "$APP_USER" -- npm ci
+  else
+    runuser -u "$APP_USER" -- npm install
+  fi
+  msg_ok "Dependencies installed"
+
+  msg_info "Building ${APP}"
+  runuser -u "$APP_USER" -- npm run build
+  msg_ok "Build complete"
+}
+
+restart_service() {
+  msg_info "Starting ${SERVICE_NAME}"
+  systemctl start "$SERVICE_NAME"
+  sleep 2
+  if systemctl is-active --quiet "$SERVICE_NAME"; then
+    msg_ok "Started ${SERVICE_NAME}"
+  else
+    systemctl --no-pager --full status "$SERVICE_NAME" || true
+    die "${SERVICE_NAME} failed to start — check: journalctl -u ${SERVICE_NAME} -n 100"
+  fi
+}
+
+run_update() {
+  header_info
+  ensure_root
+  ensure_install
+  load_conf
+
+  if [[ -n "${PROXVOICE_GIT_URL:-}" ]]; then
+    GIT_URL="$PROXVOICE_GIT_URL"
+    save_conf
+  fi
+
+  update_os_packages
+  ensure_nodejs
+
+  msg_info "Stopping ${SERVICE_NAME}"
+  systemctl stop "$SERVICE_NAME" || true
+  msg_ok "Stopped ${SERVICE_NAME}"
+
+  fetch_latest
+  install_deps_and_build
+  restart_service
+  save_conf
+
+  echo
+  msg_ok "Updated ${APP} successfully!"
+  local safe_url
+  safe_url="$(echo "$GIT_URL" | sed -E 's#https://[^@/]+@#https://#')"
+  echo -e "  ${BOLD}App:${CL}     ${APP_DIR}"
+  echo -e "  ${BOLD}Source:${CL}  ${safe_url}"
+  echo -e "  ${BOLD}Branch:${CL}  ${GIT_BRANCH}"
+  echo -e "  ${BOLD}Service:${CL} systemctl status ${SERVICE_NAME}"
+  echo
+}
+
+usage() {
+  cat <<EOF
+Usage: update [options]
+
+Update ${APP} (voxmox) application code, npm dependencies, and restart the service.
+
+Options:
+  --set-url <url>   Save the git clone URL used for future updates
+  -h, --help        Show this help
+
+Examples:
+  update
+  update --set-url 'https://github.com/tr0lls3c/voxmox.git'
+  update --set-url 'https://ghp_YOUR_PAT@github.com/tr0lls3c/voxmox.git'
+EOF
+}
+
+main() {
+  case "${1:-}" in
+    -h | --help)
+      usage
+      ;;
+    --set-url)
+      cmd_set_url "${2:-}"
+      ;;
+    "")
+      run_update
+      ;;
+    *)
+      usage
+      die "Unknown option: $1"
+      ;;
+  esac
+}
+
+main "$@"
