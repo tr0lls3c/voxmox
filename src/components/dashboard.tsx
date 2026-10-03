@@ -230,7 +230,7 @@ export function Dashboard() {
               Homelab control
             </p>
             <h1 className="font-[family-name:var(--font-display)] text-4xl tracking-tight text-foreground sm:text-5xl">
-              ProxVoice
+              Voxmox
             </h1>
             <p className="max-w-xl text-sm leading-relaxed text-muted-foreground sm:text-base">
               Voice-control your Proxmox cluster from Alexa — nodes, VMs, LXCs,
@@ -489,7 +489,7 @@ export function Dashboard() {
                 <p>
                   Example:{" "}
                   <span className="text-foreground">
-                    “Alexa, ask Prox Voice to start docker host.”
+                    “Alexa, ask vox mox to start docker host.”
                   </span>
                 </p>
               </CardContent>
