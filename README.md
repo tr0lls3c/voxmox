@@ -161,7 +161,7 @@ https://YOUR_PUBLIC_HOST/api/alexa
 | `POST /api/alexa` | Alexa skill endpoint |
 | `POST /api/alexa/simulate` | Dashboard simulator (`{ intent, slots }`) |
 | `GET /api/cluster` | Cluster overview JSON |
-| `POST /api/power` | Power action (`{ vmid\|name, type?, action }`)
+| `POST /api/power` | Power action (`{ vmid\|name, type?, action }`) |
 
 ## Security notes
 
