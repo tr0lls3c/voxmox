@@ -155,21 +155,46 @@ async function handleNodeStats(nodeName?: string): Promise<Response> {
   );
 }
 
+function parseGuestQuery(raw?: string): {
+  name?: string;
+  preferredType?: GuestType;
+} {
+  if (!raw) return {};
+  const preferredType = resolveGuestType(raw);
+  let name = raw.trim();
+
+  // Strip type words speakers often include, e.g. "pihole container".
+  name = name
+    .replace(
+      /\b(virtual\s*machines?|containers?|v\s*m|vms|lxc|l\s*x\s*c|c\s*t|qemu|machines?)\b/gi,
+      " ",
+    )
+    .replace(/\b(the|my|a|an)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return { name: name || undefined, preferredType };
+}
+
 async function handleGuestStats(
   guestName?: string,
   guestTypeRaw?: string,
 ): Promise<Response> {
-  if (!guestName) {
+  const parsed = parseGuestQuery(guestName);
+  const preferredType =
+    resolveGuestType(guestTypeRaw) ?? parsed.preferredType;
+  const name = parsed.name;
+
+  if (!name) {
     return speakReprompt(
       "Which virtual machine or container should I check?",
       "Tell me the name or ID of the guest.",
     );
   }
 
-  const preferredType = resolveGuestType(guestTypeRaw);
-  const guest = await findGuest(guestName, preferredType);
+  const guest = await findGuest(name, preferredType);
   if (!guest) {
-    return speak(`I could not find a guest named ${speakName(guestName)}.`);
+    return speak(`I could not find a guest named ${speakName(name)}.`);
   }
 
   const kind = guest.type === "lxc" ? "container" : "virtual machine";
@@ -182,7 +207,7 @@ async function handleGuestStats(
   return speak(
     `${speakName(guest.name)} is a ${kind} on ${speakName(guest.node)}. ` +
       `It is running. CPU is ${formatPercent(guest.cpu)} of ${guest.cpus} cores. ` +
-      `Memory is ${formatBytes(guest.mem)} of ${formatBytes(guest.maxmem)}. ` +
+      `Memory is ${formatBytes(guest.mem)} of ${formatBytes(guest.maxdisk)}. ` +
       `Disk is ${formatBytes(guest.disk)} of ${formatBytes(guest.maxdisk)}. ` +
       `Uptime is ${formatUptime(guest.uptime)}.`,
   );
@@ -233,17 +258,21 @@ async function handlePowerControl(
     );
   }
 
-  if (!guestName) {
+  const parsed = parseGuestQuery(guestName);
+  const preferredType =
+    resolveGuestType(guestTypeRaw) ?? parsed.preferredType;
+  const name = parsed.name;
+
+  if (!name) {
     return speakReprompt(
       `Which virtual machine or container should I ${action}?`,
       "Tell me the guest name or ID.",
     );
   }
 
-  const preferredType = resolveGuestType(guestTypeRaw);
-  const guest = await findGuest(guestName, preferredType);
+  const guest = await findGuest(name, preferredType);
   if (!guest) {
-    return speak(`I could not find a guest named ${speakName(guestName)}.`);
+    return speak(`I could not find a guest named ${speakName(name)}.`);
   }
 
   const result = await powerGuest(guest.vmid, guest.type, guest.node, action);
@@ -330,7 +359,6 @@ export async function handleAlexaRequest(
           case "GuestStatsIntent":
             response = await handleGuestStats(
               slotValue(slots, "guestName"),
-              slotValue(slots, "guestType"),
             );
             break;
           case "ListGuestsIntent":
@@ -341,6 +369,36 @@ export async function handleAlexaRequest(
               slotValue(slots, "action"),
               slotValue(slots, "guestName"),
               slotValue(slots, "guestType"),
+            );
+            break;
+          case "StartGuestIntent":
+            response = await handlePowerControl(
+              "start",
+              slotValue(slots, "guestName"),
+            );
+            break;
+          case "StopGuestIntent":
+            response = await handlePowerControl(
+              "stop",
+              slotValue(slots, "guestName"),
+            );
+            break;
+          case "ShutdownGuestIntent":
+            response = await handlePowerControl(
+              "shutdown",
+              slotValue(slots, "guestName"),
+            );
+            break;
+          case "RebootGuestIntent":
+            response = await handlePowerControl(
+              "reboot",
+              slotValue(slots, "guestName"),
+            );
+            break;
+          case "ResetGuestIntent":
+            response = await handlePowerControl(
+              "reset",
+              slotValue(slots, "guestName"),
             );
             break;
           case "PerformanceIntent":
