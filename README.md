@@ -21,7 +21,10 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open [http://127.0.0.1:43127](http://127.0.0.1:43127).
+The web UI listens on **all interfaces** (`0.0.0.0:43127`). Open it at:
+
+- Local machine: [http://127.0.0.1:43127](http://127.0.0.1:43127)
+- Another device on your network: `http://<this-host-ip>:43127`
 
 Without Proxmox credentials, the app serves a sample two-node cluster so the dashboard and Alexa simulator work out of the box.
 
@@ -96,6 +99,16 @@ update
 
 `update` pulls from GitHub, refreshes npm deps, rebuilds, and restarts the service.
 
+The dashboard is bound to **all LXC interfaces** on port **43127**. From another machine on your LAN:
+
+```bash
+# From the Proxmox host
+pct exec <CTID> -- hostname -I
+# Then open: http://<LXC-IP>:43127
+```
+
+Confirm the listen address inside the CT with `ss -tlnp | grep 43127` (you should see `0.0.0.0:43127`).
+
 Point Alexa at `https://YOUR_PUBLIC_HTTPS_HOST/api/alexa` (tunnel/proxy the CT IP on port 43127).
 
 ## Connect a real Proxmox cluster
@@ -148,7 +161,7 @@ https://YOUR_PUBLIC_HOST/api/alexa
 | `POST /api/alexa` | Alexa skill endpoint |
 | `POST /api/alexa/simulate` | Dashboard simulator (`{ intent, slots }`) |
 | `GET /api/cluster` | Cluster overview JSON |
-| `POST /api/power` | Power action (`{ vmid\|name, type?, action }`) |
+| `POST /api/power` | Power action (`{ vmid\|name, type?, action }`)
 
 ## Security notes
 
@@ -160,8 +173,8 @@ https://YOUR_PUBLIC_HOST/api/alexa
 ## Scripts
 
 ```bash
-npm run dev    # http://127.0.0.1:43127
+npm run dev    # listens on 0.0.0.0:43127 (all interfaces)
 npm run build
-npm run start
+npm run start  # listens on 0.0.0.0:43127 (all interfaces)
 npm run lint
 ```
