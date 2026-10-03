@@ -5,7 +5,9 @@ export {
   getProxmoxConfig,
   listResources,
   powerGuest,
+  testProxmoxConnection,
 } from "./client";
+export type { ProxmoxConfig, ResolvedProxmoxConfig } from "./client";
 export type {
   ClusterOverview,
   GuestStatus,

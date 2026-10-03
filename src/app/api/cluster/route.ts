@@ -5,12 +5,14 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const config = getProxmoxConfig();
+    const config = await getProxmoxConfig();
     const overview = await getClusterOverview();
     return Response.json({
       configured: !config.mock || Boolean(config.host),
       mock: config.mock,
       host: config.host || null,
+      source: config.source,
+      serverName: config.serverName ?? null,
       overview,
     });
   } catch (error) {
