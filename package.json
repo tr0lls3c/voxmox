@@ -1,5 +1,5 @@
 {
-  "name": "proxmox-alexa",
+  "name": "voxmox",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -32,5 +32,5 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  "description": "Alexa skill and dashboard for managing a Proxmox cluster"
+  "description": "Voxmox — Alexa skill and dashboard for managing a Proxmox cluster"
 }

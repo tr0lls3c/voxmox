@@ -1,4 +1,4 @@
-# ProxVoice
+# Voxmox
 
 Alexa skill + web dashboard for managing a Proxmox cluster: node/VM/LXC status, performance stats, and power controls (start, stop, shutdown, reboot, reset).
 
@@ -47,7 +47,7 @@ Run **as root on the Proxmox VE host**. No Origin install needed.
 ### One-liner (after the GitHub repo exists and is public)
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/proxvoice-lxc.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/voxmox-lxc.sh)"
 ```
 
 ### Or from a clone on the host
@@ -55,7 +55,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scr
 ```bash
 git clone https://github.com/tr0lls3c/voxmox.git
 cd voxmox
-bash scripts/proxvoice-lxc.sh
+bash scripts/voxmox-lxc.sh
 ```
 
 ### What it configures
@@ -64,9 +64,9 @@ bash scripts/proxvoice-lxc.sh
 | --- | --- |
 | CT resources | 2 CPU, 2 GB RAM, 8 GB disk |
 | OS | Debian 12 (or 13) standard template |
-| App path | `/opt/proxvoice` |
+| App path | `/opt/voxmox` |
 | Port | `43127` |
-| Service | `systemctl status proxvoice` |
+| Service | `systemctl status voxmox` |
 
 You’ll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.
 
@@ -74,21 +74,21 @@ You’ll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave t
 
 ```bash
 CTID=130 \
-HOSTNAME=proxvoice \
+HOSTNAME=voxmox \
 BRIDGE=vmbr0 \
 STORAGE=local-lvm \
-PROXVOICE_NONINTERACTIVE=1 \
+VOXMOX_NONINTERACTIVE=1 \
 PROXMOX_HOST_URL="https://192.168.1.10:8006" \
-PROXMOX_TOKEN_ID="root@pam!proxvoice" \
+PROXMOX_TOKEN_ID="root@pam!voxmox" \
 PROXMOX_TOKEN_SECRET="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" \
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/proxvoice-lxc.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/voxmox-lxc.sh)"
 ```
 
 ### After install
 
 ```bash
 pct enter <CTID>
-systemctl status proxvoice --no-pager
+systemctl status voxmox --no-pager
 
 # Same pattern as other Proxmox helper scripts:
 update
@@ -102,7 +102,7 @@ Point Alexa at `https://YOUR_PUBLIC_HTTPS_HOST/api/alexa` (tunnel/proxy the CT I
 
 1. In Proxmox, create an API token (Datacenter → Permissions → API Tokens).
 2. Grant the token permission to audit resources and manage VM/LXC power state (for example `VM.Audit`, `VM.PowerMgmt`, and path access under `/vms` and `/nodes`).
-3. Set in `.env.local` (dev) or `/opt/proxvoice/.env` (LXC):
+3. Set in `.env.local` (dev) or `/opt/voxmox/.env` (LXC):
 
 ```env
 PROXMOX_HOST=https://your-proxmox-host:8006
@@ -116,12 +116,12 @@ PROXMOX_TOKEN_SECRET=your-secret
 NODE_TLS_REJECT_UNAUTHORIZED=0
 ```
 
-Restart the app after changing env vars (`systemctl restart proxvoice` in the LXC).
+Restart the app after changing env vars (`systemctl restart voxmox` in the LXC).
 
 ## Alexa skill setup
 
 1. Create a custom Alexa skill in the [Alexa Developer Console](https://developer.amazon.com/alexa/console/ask).
-2. Import the interaction model from `alexa/interaction-model.json` (invocation name: **prox voice**).
+2. Import the interaction model from `alexa/interaction-model.json` (invocation name: **vox mox**).
 3. Expose this app on a public HTTPS URL (Cloudflare Tunnel, Tailscale Funnel, Caddy, nginx, etc.).
 4. Set the skill endpoint to:
 
@@ -133,13 +133,13 @@ https://YOUR_PUBLIC_HOST/api/alexa
 
 ### Example phrases
 
-- “Alexa, open Prox Voice”
-- “Alexa, ask Prox Voice for cluster status”
-- “Alexa, ask Prox Voice for node stats”
-- “Alexa, ask Prox Voice for stats for docker host”
-- “Alexa, ask Prox Voice to start pihole”
-- “Alexa, ask Prox Voice to shut down windows lab”
-- “Alexa, ask Prox Voice for performance”
+- “Alexa, open vox mox”
+- “Alexa, ask vox mox for cluster status”
+- “Alexa, ask vox mox for node stats”
+- “Alexa, ask vox mox for stats for docker host”
+- “Alexa, ask vox mox to start pihole”
+- “Alexa, ask vox mox to shut down windows lab”
+- “Alexa, ask vox mox for performance”
 
 ## API surface
 

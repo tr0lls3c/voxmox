@@ -40,3 +40,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Agent / push scratch files
+dash-*.json
+dash-*.mjs
+dash-*.b64
+.lxc*
+.dash*
+.push-*
+.remaining-pushes/
+.voxmox-g*.json
+.size-*
