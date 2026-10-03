@@ -1,3 +1,4 @@
+import { resolveProxmoxConfig } from "@/lib/servers/resolve";
 import {
   getMockOverview,
   getMockResources,
@@ -20,6 +21,11 @@ export interface ProxmoxConfig {
   rejectUnauthorized: boolean;
   mock: boolean;
 }
+
+export type ResolvedProxmoxConfig = ProxmoxConfig & {
+  source: "server" | "env" | "mock";
+  serverName?: string;
+};
 
 interface NodeStatusApi {
   uptime?: number;
@@ -51,33 +57,48 @@ interface NodeGuestListItem {
   template?: number;
 }
 
-function envFlag(name: string, fallback = false): boolean {
-  const value = process.env[name];
-  if (value == null || value === "") return fallback;
-  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+export async function getProxmoxConfig(
+  serverId?: string | null,
+): Promise<ResolvedProxmoxConfig> {
+  return resolveProxmoxConfig(serverId);
 }
 
-export function getProxmoxConfig(): ProxmoxConfig {
-  const host = (process.env.PROXMOX_HOST ?? "").replace(/\/$/, "");
-  const tokenId = process.env.PROXMOX_TOKEN_ID ?? "";
-  const tokenSecret = process.env.PROXMOX_TOKEN_SECRET ?? "";
-  const forceMock = envFlag("PROXMOX_MOCK", false);
-  const rejectUnauthorized = !envFlag("PROXMOX_ALLOW_SELF_SIGNED", true);
-
-  const mock = forceMock || !host || !tokenId || !tokenSecret;
-
+export async function testProxmoxConnection(input: {
+  host: string;
+  tokenId: string;
+  tokenSecret: string;
+  allowSelfSigned?: boolean;
+}): Promise<{ ok: boolean; version?: string; error?: string }> {
+  const rejectUnauthorized = input.allowSelfSigned === false;
   if (!rejectUnauthorized && process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0") {
-    // Homelab Proxmox installs commonly use self-signed certs.
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
   }
 
-  return {
-    host,
-    tokenId,
-    tokenSecret,
+  const config: ProxmoxConfig = {
+    host: input.host.replace(/\/$/, ""),
+    tokenId: input.tokenId.trim(),
+    tokenSecret: input.tokenSecret.trim(),
     rejectUnauthorized,
-    mock,
+    mock: false,
   };
+
+  try {
+    const version = await proxmoxFetch<{ version?: string; release?: string }>(
+      config,
+      "/version",
+    );
+    const label = [version.version, version.release].filter(Boolean).join(" ");
+    return {
+      ok: true,
+      version: label || "connected",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error ? error.message : "Connection test failed",
+    };
+  }
 }
 
 class ProxmoxApiError extends Error {
@@ -291,8 +312,10 @@ function mergeGuests(
   return [...byKey.values()].sort((a, b) => a.vmid - b.vmid);
 }
 
-export async function listResources(): Promise<ClusterResource[]> {
-  const config = getProxmoxConfig();
+export async function listResources(
+  serverId?: string | null,
+): Promise<ClusterResource[]> {
+  const config = await getProxmoxConfig(serverId);
   if (config.mock) return getMockResources();
 
   // Fetch untyped + vm-typed views; some tokens populate one more completely.
@@ -310,12 +333,14 @@ export async function listResources(): Promise<ClusterResource[]> {
   return [...byId.values()];
 }
 
-export async function getClusterOverview(): Promise<ClusterOverview> {
-  const config = getProxmoxConfig();
+export async function getClusterOverview(
+  serverId?: string | null,
+): Promise<ClusterOverview> {
+  const config = await getProxmoxConfig(serverId);
   if (config.mock) return getMockOverview();
 
-  const resources = await listResources();
-  let overview = buildOverview(resources, "live");
+  const resources = await listResources(serverId);
+  const overview = buildOverview(resources, "live");
 
   const nodes = await Promise.all(
     overview.nodes.map((node) => enrichNode(config, node)),
@@ -388,7 +413,7 @@ export async function powerGuest(
   node: string,
   action: PowerAction,
 ): Promise<PowerResult> {
-  const config = getProxmoxConfig();
+  const config = await getProxmoxConfig();
   if (config.mock) return mockPowerAction(vmid, type, action);
 
   const path = `/nodes/${encodeURIComponent(node)}/${type}/${vmid}/status/${action}`;
