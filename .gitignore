@@ -51,3 +51,6 @@ dash-*.b64
 .remaining-pushes/
 .voxmox-g*.json
 .size-*
+
+# Persisted runtime config (API tokens) — never commit
+/data/
