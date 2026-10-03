@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ClusterOverview, GuestStatus, PowerAction } from "@/lib/proxmox/types";
+import { ServersSetup } from "@/components/servers-setup";
 import {
   Activity,
   Box,
@@ -28,6 +29,8 @@ interface ClusterResponse {
   configured: boolean;
   mock: boolean;
   host: string | null;
+  source?: "server" | "env" | "mock";
+  serverName?: string | null;
   overview: ClusterOverview;
   error?: string;
 }
@@ -460,51 +463,13 @@ export function Dashboard() {
           </TabsContent>
 
           <TabsContent value="setup" className="space-y-4">
-            <Card className="border-border/60 bg-card/70 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle>Connect Proxmox + Alexa</CardTitle>
-                <CardDescription>
-                  Endpoint: <code className="font-mono">/api/alexa</code>
-                  {data?.host ? (
-                    <>
-                      {" "}
-                      · API host{" "}
-                      <code className="font-mono">{data.host}</code>
-                    </>
-                  ) : (
-                    " · using built-in demo cluster until credentials are set"
-                  )}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm leading-relaxed text-muted-foreground">
-                <ol className="list-decimal space-y-2 pl-5">
-                  <li>
-                    Create a Proxmox API token with VM/LXC audit + power privileges.
-                  </li>
-                  <li>
-                    Copy <code className="font-mono">.env.example</code> to{" "}
-                    <code className="font-mono">.env.local</code> and set host +
-                    token values.
-                  </li>
-                  <li>
-                    Expose this app over HTTPS (Cloudflare Tunnel, Tailscale Funnel,
-                    or a reverse proxy).
-                  </li>
-                  <li>
-                    In Alexa Developer Console, create a custom skill, import{" "}
-                    <code className="font-mono">alexa/interaction-model.json</code>,
-                    and point the default endpoint to{" "}
-                    <code className="font-mono">https://your-host/api/alexa</code>.
-                  </li>
-                </ol>
-                <p>
-                  Example:{" "}
-                  <span className="text-foreground">
-                    “Alexa, ask vox mox to start docker host.”
-                  </span>
-                </p>
-              </CardContent>
-            </Card>
+            <ServersSetup
+              activeHost={data?.host ?? null}
+              mock={data?.mock ?? true}
+              source={data?.source ?? null}
+              serverName={data?.serverName ?? null}
+              onServersChanged={() => void load()}
+            />
           </TabsContent>
         </Tabs>
       </main>
