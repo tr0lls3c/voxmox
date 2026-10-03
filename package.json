@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack -p 43127",
+    "dev": "next dev --webpack -H 0.0.0.0 -p 43127",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 43127",
     "lint": "eslint"
@@ -32,5 +32,5 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  "description": "Voxmox — Alexa skill and dashboard for managing a Proxmox cluster"
+  "description": "Voxmox \u2014 Alexa skill and dashboard for managing a Proxmox cluster"
 }

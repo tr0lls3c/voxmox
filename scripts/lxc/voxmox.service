@@ -11,9 +11,10 @@ Group=__APP_USER__
 WorkingDirectory=__APP_DIR__
 Environment=NODE_ENV=production
 Environment=PORT=__APP_PORT__
-Environment=HOSTNAME=0.0.0.0
+# Do not set Unix HOSTNAME here — that is the machine name.
+# Bind explicitly to all interfaces via ExecStart -H 0.0.0.0.
 EnvironmentFile=-__APP_DIR__/.env
-ExecStart=/usr/bin/npm run start
+ExecStart=/usr/bin/npx next start -H 0.0.0.0 -p __APP_PORT__
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=120

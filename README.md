@@ -65,7 +65,7 @@ bash scripts/voxmox-lxc.sh
 | CT resources | 2 CPU, 2 GB RAM, 8 GB disk |
 | OS | Debian 12 (or 13) standard template |
 | App path | `/opt/voxmox` |
-| Port | `43127` |
+| Port | `43127` (bound to `0.0.0.0` — all LXC interfaces) |
 | Service | `systemctl status voxmox` |
 
 You’ll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.

@@ -109,7 +109,6 @@ NODE_TLS_REJECT_UNAUTHORIZED=0
 ALEXA_SKILL_ID=${ALEXA_SKILL_ID}
 ALEXA_SKIP_SIGNATURE_VALIDATION=false
 PORT=${APP_PORT}
-HOSTNAME=0.0.0.0
 EOF
   chmod 640 "$env_file"
   chown "$APP_USER:$APP_USER" "$env_file"
@@ -149,9 +148,8 @@ Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 Environment=NODE_ENV=production
 Environment=PORT=${APP_PORT}
-Environment=HOSTNAME=0.0.0.0
 EnvironmentFile=-${APP_DIR}/.env
-ExecStart=/usr/bin/npm run start
+ExecStart=/usr/bin/npx next start -H 0.0.0.0 -p ${APP_PORT}
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=120
