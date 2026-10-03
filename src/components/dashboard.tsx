@@ -1,1 +1,1 @@
-$file:/tmp/FULL_DASHBOARD.tsx
+$file:/workspace/src/components/dashboard.tsx
