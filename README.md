@@ -135,7 +135,7 @@ Restart the app after changing env vars (`systemctl restart voxmox` in the LXC).
 
 1. Create a custom Alexa skill in the [Alexa Developer Console](https://developer.amazon.com/alexa/console/ask).
 2. Import the interaction model from `alexa/interaction-model.json` (invocation name: **vox mox**).
-   Add your real VM/LXC/node names to the `GUEST_NAME`, `NODE_NAME`, and `TARGET_NAME` custom slot types in the Alexa console (or edit the JSON before import) so recognition is reliable.
+   Guest/node names use Alexa’s free-form `AMAZON.SearchQuery` slot, so you do **not** need to edit the skill when you add VMs, LXCs, or nodes. Power actions are separate intents (`StartGuestIntent`, `StopGuestIntent`, etc.) because Alexa forbids mixing a phrase slot with other slots.
 3. Expose this app on a public HTTPS URL (Cloudflare Tunnel, Tailscale Funnel, Caddy, nginx, etc.).
 4. Set the skill endpoint to:
 
