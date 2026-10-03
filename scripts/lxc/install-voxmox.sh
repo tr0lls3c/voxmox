@@ -83,11 +83,12 @@ fetch_app() {
   # Do not leak credentials into on-disk remote URL after clone.
   git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_URL" "${APP_DIR}.git-tmp"
   rm -rf "${APP_DIR}.git-tmp/.git"
-  find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +
+  find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name '.env' ! -name 'data' -exec rm -rf {} +
   shopt -s dotglob
   mv "${APP_DIR}.git-tmp"/* "$APP_DIR"/
   shopt -u dotglob
   rm -rf "${APP_DIR}.git-tmp"
+  mkdir -p "$APP_DIR/data"
 }
 
 write_env() {
@@ -109,9 +110,12 @@ NODE_TLS_REJECT_UNAUTHORIZED=0
 ALEXA_SKILL_ID=${ALEXA_SKILL_ID}
 ALEXA_SKIP_SIGNATURE_VALIDATION=false
 PORT=${APP_PORT}
+VOXMOX_DATA_DIR=${APP_DIR}/data
 EOF
   chmod 640 "$env_file"
   chown "$APP_USER:$APP_USER" "$env_file"
+  mkdir -p "${APP_DIR}/data"
+  chown -R "$APP_USER:$APP_USER" "${APP_DIR}/data"
 }
 
 build_app() {
