@@ -282,6 +282,19 @@ export function Dashboard() {
           </div>
         ) : null}
 
+        {overview?.warnings && overview.warnings.length > 0 ? (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <p className="mb-1 font-medium text-amber-200">Proxmox API warnings</p>
+            <ul className="list-disc space-y-1 pl-5 text-amber-100/90">
+              {overview.warnings.map((warning) => (
+                <li key={warning} className="font-mono text-xs leading-relaxed">
+                  {warning}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
             {
