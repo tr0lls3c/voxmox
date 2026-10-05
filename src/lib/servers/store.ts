@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { normalizeProxmoxHost } from "@/lib/proxmox/client";
 import type {
   ProxmoxServer,
   ProxmoxServerPublic,
@@ -25,7 +26,7 @@ function configPath(): string {
 }
 
 function normalizeHost(host: string): string {
-  return host.trim().replace(/\/$/, "");
+  return normalizeProxmoxHost(host);
 }
 
 function validateInput(input: ServerInput, requireSecret: boolean): void {
