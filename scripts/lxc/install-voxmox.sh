@@ -153,7 +153,7 @@ WorkingDirectory=${APP_DIR}
 Environment=NODE_ENV=production
 Environment=PORT=${APP_PORT}
 EnvironmentFile=-${APP_DIR}/.env
-ExecStart=/usr/bin/node ${APP_DIR}/node_modules/next/dist/bin/next start -H 0.0.0.0 -p ${APP_PORT}
+ExecStart=${APP_DIR}/node_modules/.bin/next start -H 0.0.0.0 -p ${APP_PORT}
 Restart=on-failure
 RestartSec=3
 TimeoutStartSec=30
