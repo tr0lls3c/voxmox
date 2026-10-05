@@ -14,10 +14,11 @@ Environment=PORT=__APP_PORT__
 # Do not set Unix HOSTNAME here — that is the machine name.
 # Bind explicitly to all interfaces via ExecStart -H 0.0.0.0.
 EnvironmentFile=-__APP_DIR__/.env
-ExecStart=/usr/bin/npx next start -H 0.0.0.0 -p __APP_PORT__
+# Call next directly (npx adds several seconds of startup overhead).
+ExecStart=/usr/bin/node __APP_DIR__/node_modules/next/dist/bin/next start -H 0.0.0.0 -p __APP_PORT__
 Restart=on-failure
-RestartSec=5
-TimeoutStartSec=120
+RestartSec=3
+TimeoutStartSec=30
 LimitNOFILE=65535
 NoNewPrivileges=true
 PrivateTmp=true
