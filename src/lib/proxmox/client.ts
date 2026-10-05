@@ -27,6 +27,21 @@ export type ResolvedProxmoxConfig = ProxmoxConfig & {
   serverName?: string;
 };
 
+/** Strip trailing slash and optional /api2/json so we always append it once. */
+export function normalizeProxmoxHost(host: string): string {
+  return host
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\/api2\/json\/?$/i, "");
+}
+
+/** Full Proxmox JSON API root, e.g. https://pve:8006/api2/json */
+export function proxmoxApiBase(host: string): string {
+  return `${normalizeProxmoxHost(host)}/api2/json`;
+}
+
+const PROXMOX_FETCH_TIMEOUT_MS = 10_000;
+
 interface NodeStatusApi {
   uptime?: number;
   cpu?: number;
@@ -75,7 +90,7 @@ export async function testProxmoxConnection(input: {
   }
 
   const config: ProxmoxConfig = {
-    host: input.host.replace(/\/$/, ""),
+    host: normalizeProxmoxHost(input.host),
     tokenId: input.tokenId.trim(),
     tokenSecret: input.tokenSecret.trim(),
     rejectUnauthorized,
@@ -120,29 +135,53 @@ async function proxmoxFetch<T>(
     throw new ProxmoxApiError("PROXMOX_HOST is not configured.");
   }
 
-  const url = `${config.host}/api2/json${path}`;
+  const apiPath = path.startsWith("/") ? path : `/${path}`;
+  const url = `${proxmoxApiBase(config.host)}${apiPath}`;
   const headers = new Headers(init?.headers);
   headers.set(
     "Authorization",
     `PVEAPIToken=${config.tokenId}=${config.tokenSecret}`,
   );
 
-  const response = await fetch(url, {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    PROXMOX_FETCH_TIMEOUT_MS,
+  );
+  // Combine with any caller-provided signal.
+  const onAbort = () => controller.abort();
+  init?.signal?.addEventListener("abort", onAbort);
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new ProxmoxApiError(
-      `Proxmox API ${response.status}: ${body || response.statusText}`,
-      response.status,
-    );
+  try {
+    const response = await fetch(url, {
+      ...init,
+      headers,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new ProxmoxApiError(
+        `Proxmox API ${response.status} at ${url}: ${body || response.statusText}`,
+        response.status,
+      );
+    }
+
+    const json = (await response.json()) as { data: T };
+    return json.data;
+  } catch (error) {
+    if (error instanceof ProxmoxApiError) throw error;
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new ProxmoxApiError(
+        `Proxmox API timed out after ${PROXMOX_FETCH_TIMEOUT_MS / 1000}s at ${url}`,
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    init?.signal?.removeEventListener("abort", onAbort);
   }
-
-  const json = (await response.json()) as { data: T };
-  return json.data;
 }
 
 function resourceToGuest(resource: ClusterResource): GuestStatus | null {
