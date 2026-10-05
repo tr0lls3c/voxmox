@@ -29,7 +29,7 @@ The web UI listens on **all interfaces** (`0.0.0.0:43127`). Open it at:
 
 Without Proxmox credentials, the app serves a sample two-node cluster so the dashboard and Alexa simulator work out of the box.
 
-In the **Setup** tab you can add live Proxmox servers (API URL + API token). Credentials are saved under `data/servers.json` on the host and are preferred over `.env` values.
+In the **Setup** tab you can add live Proxmox servers (API URL + API token). Credentials are saved under `/var/lib/voxmox/servers.json` on LXC installs (or `./data/servers.json` in local dev) and are preferred over `.env` values. That path is **outside** the app tree, so `update` and reboots keep your servers.
 
 ## Publish to GitHub (one-time)
 
@@ -123,7 +123,7 @@ Point Alexa at `https://YOUR_PUBLIC_HTTPS_HOST/api/alexa` (tunnel/proxy the CT I
 3. Use **Test connection**, then save. Mark the server active (or click **Use** later).
 4. Edit or remove servers anytime from the same tab. Secrets are never returned to the browser after save.
 
-Saved servers live in `data/servers.json` (or `$VOXMOX_DATA_DIR`). LXC `update` preserves that folder.
+Saved servers live in `/var/lib/voxmox/servers.json` (override with `$VOXMOX_DATA_DIR`). LXC `update` migrates any legacy `/opt/voxmox/data/servers.json`, keeps `.env`, and never deletes the durable data directory.
 
 ### From environment variables (fallback)
 
@@ -192,7 +192,7 @@ https://YOUR_PUBLIC_HOST/api/alexa
 - Run this service on a host that can reach your Proxmox API; do not expose Proxmox itself publicly.
 - Prefer a least-privilege API token over `root@pam`.
 - Production requests to `/api/alexa` verify Amazon’s signature headers (skipped automatically in development).
-- Tokens saved in the Setup UI are written to `data/servers.json` with mode `0600`. Keep that path off shared/public storage and out of git.
+- Tokens saved in the Setup UI are written to `/var/lib/voxmox/servers.json` (mode `0600`) on LXC installs. Keep that path off shared/public storage and out of git.
 - The dashboard power buttons can change guest state — treat the public URL like any privileged control plane.
 
 ## Scripts
