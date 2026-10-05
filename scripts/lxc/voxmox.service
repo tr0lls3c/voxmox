@@ -11,6 +11,8 @@ Group=__APP_USER__
 WorkingDirectory=__APP_DIR__
 Environment=NODE_ENV=production
 Environment=PORT=__APP_PORT__
+# Durable settings path (servers.json). Survives app updates under __APP_DIR__.
+Environment=VOXMOX_DATA_DIR=/var/lib/voxmox
 # Do not set Unix HOSTNAME here — that is the machine name.
 # Bind explicitly to all interfaces via ExecStart -H 0.0.0.0.
 EnvironmentFile=-__APP_DIR__/.env
