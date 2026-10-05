@@ -5,6 +5,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/voxmox}"
 APP_USER="${APP_USER:-voxmox}"
 APP_PORT="${APP_PORT:-43127}"
+DATA_DIR="${DATA_DIR:-/var/lib/voxmox}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
 GIT_URL="${GIT_URL:-https://github.com/tr0lls3c/voxmox.git}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
@@ -88,11 +89,39 @@ fetch_app() {
   mv "${APP_DIR}.git-tmp"/* "$APP_DIR"/
   shopt -u dotglob
   rm -rf "${APP_DIR}.git-tmp"
-  mkdir -p "$APP_DIR/data"
+}
+
+ensure_persistent_data() {
+  msg "Ensuring persistent data dir ${DATA_DIR}"
+  mkdir -p "$DATA_DIR"
+  chown "$APP_USER:$APP_USER" "$DATA_DIR"
+  chmod 750 "$DATA_DIR"
+
+  # Migrate legacy in-app data/ if present.
+  if [[ -f "$APP_DIR/data/servers.json" && ! -f "$DATA_DIR/servers.json" ]]; then
+    msg "Migrating servers.json from ${APP_DIR}/data → ${DATA_DIR}"
+    cp -a "$APP_DIR/data/servers.json" "$DATA_DIR/servers.json"
+    chown "$APP_USER:$APP_USER" "$DATA_DIR/servers.json"
+    chmod 600 "$DATA_DIR/servers.json"
+  fi
 }
 
 write_env() {
   local env_file="${APP_DIR}/.env"
+  ensure_persistent_data
+
+  if [[ -f "$env_file" ]]; then
+    msg "Preserving existing ${env_file} (not overwriting tokens)"
+    if grep -q '^VOXMOX_DATA_DIR=' "$env_file"; then
+      sed -i "s|^VOXMOX_DATA_DIR=.*|VOXMOX_DATA_DIR=${DATA_DIR}|" "$env_file"
+    else
+      printf '\nVOXMOX_DATA_DIR=%s\n' "$DATA_DIR" >>"$env_file"
+    fi
+    chown "$APP_USER:$APP_USER" "$env_file"
+    chmod 640 "$env_file"
+    return
+  fi
+
   local mock="$PROXMOX_MOCK"
   if [[ -z "$PROXMOX_TOKEN_ID" || -z "$PROXMOX_TOKEN_SECRET" ]]; then
     mock="true"
@@ -110,12 +139,10 @@ NODE_TLS_REJECT_UNAUTHORIZED=0
 ALEXA_SKILL_ID=${ALEXA_SKILL_ID}
 ALEXA_SKIP_SIGNATURE_VALIDATION=false
 PORT=${APP_PORT}
-VOXMOX_DATA_DIR=${APP_DIR}/data
+VOXMOX_DATA_DIR=${DATA_DIR}
 EOF
   chmod 640 "$env_file"
   chown "$APP_USER:$APP_USER" "$env_file"
-  mkdir -p "${APP_DIR}/data"
-  chown -R "$APP_USER:$APP_USER" "${APP_DIR}/data"
 }
 
 build_app() {
@@ -152,6 +179,7 @@ Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 Environment=NODE_ENV=production
 Environment=PORT=${APP_PORT}
+Environment=VOXMOX_DATA_DIR=${DATA_DIR}
 EnvironmentFile=-${APP_DIR}/.env
 ExecStart=${APP_DIR}/node_modules/.bin/next start -H 0.0.0.0 -p ${APP_PORT}
 Restart=on-failure
@@ -218,6 +246,7 @@ configure_motd() {
   Dashboard : http://$(hostname -I | awk '{print $1}'):${APP_PORT}
   Alexa     : /api/alexa
   App dir   : ${APP_DIR}
+  Settings  : ${DATA_DIR}/servers.json
   Service   : systemctl status voxmox
   Update    : update
 
