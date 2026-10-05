@@ -4,7 +4,9 @@ export {
   getNodeStatus,
   getProxmoxConfig,
   listResources,
+  normalizeProxmoxHost,
   powerGuest,
+  proxmoxApiBase,
   testProxmoxConnection,
 } from "./client";
 export type { ProxmoxConfig, ResolvedProxmoxConfig } from "./client";
