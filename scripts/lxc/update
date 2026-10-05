@@ -13,6 +13,7 @@ set -euo pipefail
 APP="Voxmox"
 APP_DIR="${APP_DIR:-/opt/voxmox}"
 APP_USER="${APP_USER:-voxmox}"
+DATA_DIR="${DATA_DIR:-/var/lib/voxmox}"
 CONF_DIR="/etc/voxmox"
 CONF_FILE="${CONF_DIR}/update.conf"
 LOCK_HASH_FILE="${CONF_DIR}/package-lock.sha256"
@@ -149,8 +150,48 @@ ensure_tools() {
   fi
 }
 
+ensure_persistent_data() {
+  msg_info "Ensuring persistent settings in ${DATA_DIR}"
+  mkdir -p "$DATA_DIR" "$CONF_DIR"
+  chown "$APP_USER:$APP_USER" "$DATA_DIR"
+  chmod 750 "$DATA_DIR"
+
+  # Migrate legacy in-app data/ → durable path.
+  if [[ -f "$APP_DIR/data/servers.json" && ! -f "$DATA_DIR/servers.json" ]]; then
+    msg_info "Migrating servers.json from ${APP_DIR}/data → ${DATA_DIR}"
+    cp -a "$APP_DIR/data/servers.json" "$DATA_DIR/servers.json"
+    chown "$APP_USER:$APP_USER" "$DATA_DIR/servers.json"
+    chmod 600 "$DATA_DIR/servers.json"
+  fi
+
+  # Keep a backup copy under /etc/voxmox as well.
+  if [[ -f "$DATA_DIR/servers.json" ]]; then
+    cp -a "$DATA_DIR/servers.json" "$CONF_DIR/servers.json.bak"
+    chmod 600 "$CONF_DIR/servers.json.bak"
+  elif [[ -f "$CONF_DIR/servers.json.bak" && ! -f "$DATA_DIR/servers.json" ]]; then
+    msg_info "Restoring servers.json from ${CONF_DIR}/servers.json.bak"
+    cp -a "$CONF_DIR/servers.json.bak" "$DATA_DIR/servers.json"
+    chown "$APP_USER:$APP_USER" "$DATA_DIR/servers.json"
+    chmod 600 "$DATA_DIR/servers.json"
+  fi
+
+  # Point .env at the durable path without clobbering other settings.
+  local env_file="${APP_DIR}/.env"
+  if [[ -f "$env_file" ]]; then
+    if grep -q '^VOXMOX_DATA_DIR=' "$env_file"; then
+      sed -i "s|^VOXMOX_DATA_DIR=.*|VOXMOX_DATA_DIR=${DATA_DIR}|" "$env_file"
+    else
+      printf '\nVOXMOX_DATA_DIR=%s\n' "$DATA_DIR" >>"$env_file"
+    fi
+  fi
+  msg_ok "Settings dir ready (${DATA_DIR})"
+}
+
 fetch_latest() {
   [[ -n "${GIT_URL:-}" ]] || die "No git URL configured. Run: update --set-url 'https://github.com/tr0lls3c/voxmox.git'"
+
+  # Snapshot settings before touching app files.
+  ensure_persistent_data
 
   msg_info "Fetching ${APP} (${GIT_BRANCH}) from git"
   TMP="$(mktemp -d)"
@@ -180,8 +221,12 @@ For a private GitHub repo (classic PAT with repo scope):
     --exclude data \
     "$TMP/src/" "$APP_DIR/"
 
-  mkdir -p "$APP_DIR/data"
+  # Re-assert persistence after rsync (never let app tree own the source of truth).
+  ensure_persistent_data
   chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+  # data dir ownership again in case chown -R somehow touched a bind-mount (it shouldn't).
+  chown "$APP_USER:$APP_USER" "$DATA_DIR" 2>/dev/null || true
+  [[ -f "$DATA_DIR/servers.json" ]] && chown "$APP_USER:$APP_USER" "$DATA_DIR/servers.json"
   msg_ok "Application files updated"
 }
 
@@ -255,6 +300,12 @@ refresh_systemd_unit() {
       -e "s|__APP_USER__|${APP_USER}|g" \
       -e "s|__APP_PORT__|${port}|g" \
       "$unit"
+    # Ensure durable data dir is always set even if template lagged.
+    if ! grep -q '^Environment=VOXMOX_DATA_DIR=' "$unit"; then
+      sed -i "/^Environment=PORT=/a Environment=VOXMOX_DATA_DIR=${DATA_DIR}" "$unit"
+    else
+      sed -i "s|^Environment=VOXMOX_DATA_DIR=.*|Environment=VOXMOX_DATA_DIR=${DATA_DIR}|" "$unit"
+    fi
     systemctl daemon-reload
     msg_ok "systemd unit refreshed"
   fi
@@ -300,6 +351,7 @@ run_update() {
 
   ensure_tools
   ensure_nodejs
+  ensure_persistent_data
 
   # Keep the dashboard online while we fetch/build. Production next start only
   # needs .next + node_modules at runtime, so src can be updated live.
@@ -313,6 +365,7 @@ run_update() {
   local safe_url
   safe_url="$(echo "$GIT_URL" | sed -E 's#https://[^@/]+@#https://#')"
   echo -e "  ${BOLD}App:${CL}     ${APP_DIR}"
+  echo -e "  ${BOLD}Data:${CL}    ${DATA_DIR}  (servers.json — survives updates/reboots)"
   echo -e "  ${BOLD}Source:${CL}  ${safe_url}"
   echo -e "  ${BOLD}Branch:${CL}  ${GIT_BRANCH}"
   echo -e "  ${BOLD}Service:${CL} systemctl status ${SERVICE_NAME}"
