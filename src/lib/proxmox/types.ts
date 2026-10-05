@@ -69,6 +69,8 @@ export interface ClusterOverview {
     runningGuests: number;
     stoppedGuests: number;
   };
+  /** Non-fatal Proxmox API issues (permissions, partial failures). */
+  warnings?: string[];
 }
 
 export interface PowerResult {
