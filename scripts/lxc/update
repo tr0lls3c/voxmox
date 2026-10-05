@@ -16,6 +16,7 @@ APP_USER="${APP_USER:-voxmox}"
 CONF_DIR="/etc/voxmox"
 CONF_FILE="${CONF_DIR}/update.conf"
 LOCK_HASH_FILE="${CONF_DIR}/package-lock.sha256"
+BUILD_HASH_FILE="${CONF_DIR}/build-inputs.sha256"
 SERVICE_NAME="voxmox"
 DEFAULT_GIT_URL="https://github.com/tr0lls3c/voxmox.git"
 FULL_OS_UPDATE=0
@@ -192,6 +193,17 @@ lockfile_hash() {
   fi
 }
 
+# Hash of inputs that affect `next build` output.
+build_inputs_hash() {
+  (
+    cd "$APP_DIR" || exit 1
+    # shellcheck disable=SC2038
+    find src public package.json package-lock.json next.config.ts tsconfig.json \
+      postcss.config.mjs components.json app 2>/dev/null \
+      -type f | sort | xargs sha256sum 2>/dev/null | sha256sum | awk '{print $1}'
+  )
+}
+
 install_deps_and_build() {
   cd "$APP_DIR"
   local new_hash prev_hash
@@ -212,9 +224,20 @@ install_deps_and_build() {
     msg_ok "Dependencies installed"
   fi
 
-  msg_info "Building ${APP}"
-  runuser -u "$APP_USER" -- npm run build
-  msg_ok "Build complete"
+  local build_hash prev_build
+  build_hash="$(build_inputs_hash)"
+  prev_build="$(cat "$BUILD_HASH_FILE" 2>/dev/null || true)"
+
+  if [[ -d .next ]] && [[ -n "$prev_build" ]] && [[ "$build_hash" == "$prev_build" ]]; then
+    msg_ok "App sources unchanged — skipping next build"
+  else
+    msg_info "Building ${APP}"
+    export NEXT_TELEMETRY_DISABLED=1
+    runuser -u "$APP_USER" -- env NEXT_TELEMETRY_DISABLED=1 npm run build
+    mkdir -p "$CONF_DIR"
+    echo "$build_hash" >"$BUILD_HASH_FILE"
+    msg_ok "Build complete"
+  fi
 }
 
 # Keep systemd unit in sync so ExecStart stays on the fast direct next binary.
@@ -239,17 +262,27 @@ refresh_systemd_unit() {
 
 restart_service() {
   refresh_systemd_unit
-  msg_info "Starting ${SERVICE_NAME}"
-  systemctl start "$SERVICE_NAME"
+  local port
+  port="$(systemctl show -p Environment --value "$SERVICE_NAME" 2>/dev/null | tr ' ' '\n' | sed -n 's/^PORT=//p' | tail -1)"
+  port="${port:-43127}"
+
+  msg_info "Restarting ${SERVICE_NAME}"
+  systemctl restart "$SERVICE_NAME"
   # next start (direct binary) is usually ready in <2s; poll instead of fixed sleep.
   local i
-  for i in $(seq 1 20); do
+  for i in $(seq 1 40); do
     if systemctl is-active --quiet "$SERVICE_NAME"; then
-      msg_ok "Started ${SERVICE_NAME}"
-      return 0
+      if curl -fsS -o /dev/null --max-time 1 "http://127.0.0.1:${port}/" 2>/dev/null; then
+        msg_ok "Restarted ${SERVICE_NAME} (ready on :${port})"
+        return 0
+      fi
     fi
     sleep 0.25
   done
+  if systemctl is-active --quiet "$SERVICE_NAME"; then
+    msg_ok "Restarted ${SERVICE_NAME}"
+    return 0
+  fi
   systemctl --no-pager --full status "$SERVICE_NAME" || true
   die "${SERVICE_NAME} failed to start — check: journalctl -u ${SERVICE_NAME} -n 100"
 }
@@ -268,10 +301,8 @@ run_update() {
   ensure_tools
   ensure_nodejs
 
-  msg_info "Stopping ${SERVICE_NAME}"
-  systemctl stop "$SERVICE_NAME" || true
-  msg_ok "Stopped ${SERVICE_NAME}"
-
+  # Keep the dashboard online while we fetch/build. Production next start only
+  # needs .next + node_modules at runtime, so src can be updated live.
   fetch_latest
   install_deps_and_build
   restart_service
