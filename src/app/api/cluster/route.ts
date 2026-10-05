@@ -1,4 +1,8 @@
-import { getClusterOverview, getProxmoxConfig } from "@/lib/proxmox";
+import {
+  getClusterOverview,
+  getProxmoxConfig,
+  proxmoxApiBase,
+} from "@/lib/proxmox";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,10 +11,13 @@ export async function GET() {
   try {
     const config = await getProxmoxConfig();
     const overview = await getClusterOverview();
+    const host = config.host || null;
     return Response.json({
       configured: !config.mock || Boolean(config.host),
       mock: config.mock,
-      host: config.host || null,
+      host,
+      /** Full Proxmox JSON API root used by the backend. */
+      apiBase: host ? proxmoxApiBase(host) : null,
       source: config.source,
       serverName: config.serverName ?? null,
       overview,
