@@ -129,8 +129,9 @@ Saved servers live in `data/servers.json` (or `$VOXMOX_DATA_DIR`). LXC `update` 
 
 1. In Proxmox, create an API token (Datacenter → Permissions → API Tokens).
 2. Grant the token permission to read cluster/node status and manage guests. A typical least-privilege set:
-   - Path `/` or `/nodes`: `Sys.Audit` (node stats)
+   - Path `/` or `/nodes`: `Sys.Audit` (node CPU/RAM/uptime — **required** for live stats)
    - Path `/vms`: `VM.Audit`, `VM.PowerMgmt` (list guests + power actions)
+   Without `Sys.Audit`, the dashboard can show nodes as online with 0% / 0 B stats.
 3. Set in `.env.local` (dev) or `/opt/voxmox/.env` (LXC):
 
 ```env
