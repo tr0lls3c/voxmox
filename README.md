@@ -100,7 +100,7 @@ systemctl status voxmox --no-pager
 update
 ```
 
-`update` pulls from GitHub, refreshes npm deps, rebuilds, and restarts the service.
+`update` pulls from GitHub, skips a full OS upgrade by default (use `update --full` for that), reuses npm deps when `package-lock.json` is unchanged, rebuilds, refreshes the systemd unit, and restarts the service.
 
 The dashboard is bound to **all LXC interfaces** on port **43127**. From another machine on your LAN:
 
@@ -119,7 +119,7 @@ Point Alexa at `https://YOUR_PUBLIC_HTTPS_HOST/api/alexa` (tunnel/proxy the CT I
 ### From the web UI (recommended)
 
 1. Open the dashboard → **Setup**.
-2. Click **Add server**, enter a name, API URL (`https://your-host:8006`), token ID, and token secret.
+2. Click **Add server**, enter a name, Proxmox base URL (`https://your-host:8006`), token ID, and token secret. Do **not** append `/api2/json` — Voxmox always calls `{host}/api2/json/...`.
 3. Use **Test connection**, then save. Mark the server active (or click **Use** later).
 4. Edit or remove servers anytime from the same tab. Secrets are never returned to the browser after save.
 
