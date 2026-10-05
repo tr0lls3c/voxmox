@@ -29,6 +29,7 @@ interface ClusterResponse {
   configured: boolean;
   mock: boolean;
   host: string | null;
+  apiBase?: string | null;
   source?: "server" | "env" | "mock";
   serverName?: string | null;
   overview: ClusterOverview;
@@ -465,6 +466,7 @@ export function Dashboard() {
           <TabsContent value="setup" className="space-y-4">
             <ServersSetup
               activeHost={data?.host ?? null}
+              apiBase={data?.apiBase ?? null}
               mock={data?.mock ?? true}
               source={data?.source ?? null}
               serverName={data?.serverName ?? null}
