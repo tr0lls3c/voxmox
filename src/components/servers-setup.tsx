@@ -52,6 +52,7 @@ export function ServersSetup({
   onServersChanged,
 }: ServersSetupProps) {
   const [servers, setServers] = useState<ProxmoxServerPublic[]>([]);
+  const [configPath, setConfigPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -70,6 +71,7 @@ export function ServersSetup({
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load servers");
       setServers(json.servers ?? []);
+      setConfigPath(json.configPath ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load servers");
     } finally {
@@ -260,10 +262,12 @@ export function ServersSetup({
         <CardHeader>
           <CardTitle>Proxmox servers</CardTitle>
           <CardDescription>
-            Add, edit, or remove API endpoints from this dashboard. Active
-            credentials are stored in{" "}
-            <code className="font-mono">data/servers.json</code> on the Voxmox
-            host (not in git). Env vars still work as a fallback.
+            Add, edit, or remove API endpoints from this dashboard. Credentials
+            persist across updates and reboots in{" "}
+            <code className="font-mono">
+              {configPath ?? "/var/lib/voxmox/servers.json"}
+            </code>
+            . Env vars still work as a fallback.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
