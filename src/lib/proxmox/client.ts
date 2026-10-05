@@ -40,7 +40,7 @@ export function proxmoxApiBase(host: string): string {
   return `${normalizeProxmoxHost(host)}/api2/json`;
 }
 
-const PROXMOX_FETCH_TIMEOUT_MS = 10_000;
+const PROXMOX_FETCH_TIMEOUT_MS = 12_000;
 
 interface NodeStatusApi {
   uptime?: number;
@@ -56,6 +56,17 @@ interface NodeStatusApi {
   cpuinfo?: {
     cpus?: number;
   };
+}
+
+interface NodeIndexItem {
+  node: string;
+  status?: string;
+  cpu?: number;
+  maxcpu?: number;
+  mem?: number;
+  maxmem?: number;
+  uptime?: number;
+  ssl_fingerprint?: string;
 }
 
 interface NodeGuestListItem {
@@ -83,11 +94,9 @@ export async function testProxmoxConnection(input: {
   tokenId: string;
   tokenSecret: string;
   allowSelfSigned?: boolean;
-}): Promise<{ ok: boolean; version?: string; error?: string }> {
+}): Promise<{ ok: boolean; version?: string; error?: string; apiBase?: string }> {
   const rejectUnauthorized = input.allowSelfSigned === false;
-  if (!rejectUnauthorized && process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0") {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-  }
+  applyTlsEnv(rejectUnauthorized);
 
   const config: ProxmoxConfig = {
     host: normalizeProxmoxHost(input.host),
@@ -106,10 +115,12 @@ export async function testProxmoxConnection(input: {
     return {
       ok: true,
       version: label || "connected",
+      apiBase: proxmoxApiBase(config.host),
     };
   } catch (error) {
     return {
       ok: false,
+      apiBase: proxmoxApiBase(config.host),
       error:
         error instanceof Error ? error.message : "Connection test failed",
     };
@@ -126,6 +137,12 @@ class ProxmoxApiError extends Error {
   }
 }
 
+function applyTlsEnv(rejectUnauthorized: boolean): void {
+  if (!rejectUnauthorized && process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0") {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  }
+}
+
 async function proxmoxFetch<T>(
   config: ProxmoxConfig,
   path: string,
@@ -134,6 +151,8 @@ async function proxmoxFetch<T>(
   if (!config.host) {
     throw new ProxmoxApiError("PROXMOX_HOST is not configured.");
   }
+
+  applyTlsEnv(config.rejectUnauthorized);
 
   const apiPath = path.startsWith("/") ? path : `/${path}`;
   const url = `${proxmoxApiBase(config.host)}${apiPath}`;
@@ -148,7 +167,6 @@ async function proxmoxFetch<T>(
     () => controller.abort(),
     PROXMOX_FETCH_TIMEOUT_MS,
   );
-  // Combine with any caller-provided signal.
   const onAbort = () => controller.abort();
   init?.signal?.addEventListener("abort", onAbort);
 
@@ -163,7 +181,7 @@ async function proxmoxFetch<T>(
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       throw new ProxmoxApiError(
-        `Proxmox API ${response.status} at ${url}: ${body || response.statusText}`,
+        `Proxmox API ${response.status} at ${apiPath}: ${body || response.statusText}`,
         response.status,
       );
     }
@@ -174,7 +192,7 @@ async function proxmoxFetch<T>(
     if (error instanceof ProxmoxApiError) throw error;
     if (error instanceof Error && error.name === "AbortError") {
       throw new ProxmoxApiError(
-        `Proxmox API timed out after ${PROXMOX_FETCH_TIMEOUT_MS / 1000}s at ${url}`,
+        `Proxmox API timed out after ${PROXMOX_FETCH_TIMEOUT_MS / 1000}s at ${apiPath}`,
       );
     }
     throw error;
@@ -221,6 +239,18 @@ function resourceToNode(resource: ClusterResource): NodeStatus | null {
   };
 }
 
+function nodeIndexToStatus(item: NodeIndexItem): NodeStatus {
+  return {
+    node: item.node,
+    status: item.status ?? "unknown",
+    cpu: item.cpu ?? 0,
+    maxcpu: item.maxcpu ?? 0,
+    mem: item.mem ?? 0,
+    maxmem: item.maxmem ?? 0,
+    uptime: item.uptime ?? 0,
+  };
+}
+
 function summarize(nodes: NodeStatus[], guests: GuestStatus[]) {
   return {
     nodeCount: nodes.length,
@@ -254,7 +284,7 @@ function buildOverview(
   };
 }
 
-function nodeNeedsEnrichment(node: NodeStatus): boolean {
+function nodeStatsMissing(node: NodeStatus): boolean {
   return (
     node.maxmem <= 0 ||
     node.maxcpu <= 0 ||
@@ -262,11 +292,49 @@ function nodeNeedsEnrichment(node: NodeStatus): boolean {
   );
 }
 
-async function enrichNode(
+function mergeNodeStats(base: NodeStatus, richer: NodeStatus): NodeStatus {
+  return {
+    node: base.node,
+    status:
+      richer.status && richer.status !== "unknown"
+        ? richer.status
+        : base.status,
+    cpu: richer.cpu || base.cpu,
+    maxcpu: richer.maxcpu || base.maxcpu,
+    mem: richer.mem || base.mem,
+    maxmem: richer.maxmem || base.maxmem,
+    uptime: richer.uptime || base.uptime,
+    loadavg: richer.loadavg ?? base.loadavg,
+  };
+}
+
+async function listNodesIndex(
+  config: ProxmoxConfig,
+): Promise<{ nodes: NodeStatus[]; error?: string }> {
+  try {
+    const items = await proxmoxFetch<NodeIndexItem[]>(config, "/nodes");
+    return {
+      nodes: items
+        .filter((item) => Boolean(item.node))
+        .map(nodeIndexToStatus)
+        .sort((a, b) => a.node.localeCompare(b.node)),
+    };
+  } catch (error) {
+    return {
+      nodes: [],
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to list /nodes",
+    };
+  }
+}
+
+async function enrichNodeFromStatus(
   config: ProxmoxConfig,
   node: NodeStatus,
-): Promise<NodeStatus> {
-  if (!nodeNeedsEnrichment(node)) return node;
+): Promise<{ node: NodeStatus; error?: string }> {
+  if (!nodeStatsMissing(node)) return { node };
 
   try {
     const status = await proxmoxFetch<NodeStatusApi>(
@@ -275,20 +343,27 @@ async function enrichNode(
     );
 
     return {
-      ...node,
-      status: node.status === "unknown" ? "online" : node.status,
-      cpu: status.cpu ?? node.cpu,
-      maxcpu: status.cpuinfo?.cpus || node.maxcpu || 1,
-      mem: status.memory?.used ?? status.mem ?? node.mem,
-      maxmem: status.memory?.total ?? status.maxmem ?? node.maxmem,
-      uptime: status.uptime ?? node.uptime,
-      loadavg: status.loadavg ?? node.loadavg,
+      node: {
+        ...node,
+        status: node.status === "unknown" ? "online" : node.status,
+        cpu: status.cpu ?? node.cpu,
+        maxcpu: status.cpuinfo?.cpus || node.maxcpu || 1,
+        mem: status.memory?.used ?? status.mem ?? node.mem,
+        maxmem: status.memory?.total ?? status.maxmem ?? node.maxmem,
+        uptime: status.uptime ?? node.uptime,
+        loadavg: status.loadavg ?? node.loadavg,
+      },
     };
   } catch (error) {
-    console.warn(`Failed to enrich node ${node.node}:`, error);
     return {
-      ...node,
-      maxcpu: node.maxcpu || 1,
+      node: {
+        ...node,
+        maxcpu: node.maxcpu || 1,
+      },
+      error:
+        error instanceof Error
+          ? `${node.node}: ${error.message}`
+          : `${node.node}: status fetch failed`,
     };
   }
 }
@@ -297,47 +372,57 @@ async function listGuestsOnNode(
   config: ProxmoxConfig,
   node: string,
   type: GuestType,
-): Promise<GuestStatus[]> {
+): Promise<{ guests: GuestStatus[]; error?: string }> {
   try {
     const items = await proxmoxFetch<NodeGuestListItem[]>(
       config,
       `/nodes/${encodeURIComponent(node)}/${type}`,
     );
 
-    return items
-      .filter((item) => item.template !== 1)
-      .map((item) => ({
-        vmid: item.vmid,
-        name: item.name ?? `${type}-${item.vmid}`,
-        type,
-        node,
-        status: item.status ?? "unknown",
-        cpu: item.cpu ?? 0,
-        cpus: item.cpus ?? 1,
-        mem: item.mem ?? 0,
-        maxmem: item.maxmem ?? 0,
-        disk: item.disk ?? 0,
-        maxdisk: item.maxdisk ?? 0,
-        uptime: item.uptime ?? 0,
-      }));
+    return {
+      guests: items
+        .filter((item) => item.template !== 1)
+        .map((item) => ({
+          vmid: item.vmid,
+          name: item.name ?? `${type}-${item.vmid}`,
+          type,
+          node,
+          status: item.status ?? "unknown",
+          cpu: item.cpu ?? 0,
+          cpus: item.cpus ?? 1,
+          mem: item.mem ?? 0,
+          maxmem: item.maxmem ?? 0,
+          disk: item.disk ?? 0,
+          maxdisk: item.maxdisk ?? 0,
+          uptime: item.uptime ?? 0,
+        })),
+    };
   } catch (error) {
-    console.warn(`Failed to list ${type} on ${node}:`, error);
-    return [];
+    return {
+      guests: [],
+      error:
+        error instanceof Error
+          ? `${node}/${type}: ${error.message}`
+          : `${node}/${type}: list failed`,
+    };
   }
 }
 
 async function discoverGuests(
   config: ProxmoxConfig,
   nodes: NodeStatus[],
-): Promise<GuestStatus[]> {
-  const lists = await Promise.all(
+): Promise<{ guests: GuestStatus[]; errors: string[] }> {
+  const results = await Promise.all(
     nodes.flatMap((node) => [
       listGuestsOnNode(config, node.node, "qemu"),
       listGuestsOnNode(config, node.node, "lxc"),
     ]),
   );
 
-  return lists.flat().sort((a, b) => a.vmid - b.vmid);
+  return {
+    guests: results.flatMap((r) => r.guests).sort((a, b) => a.vmid - b.vmid),
+    errors: results.map((r) => r.error).filter((e): e is string => Boolean(e)),
+  };
 }
 
 function mergeGuests(
@@ -351,22 +436,40 @@ function mergeGuests(
   return [...byKey.values()].sort((a, b) => a.vmid - b.vmid);
 }
 
+function mergeNodeLists(
+  primary: NodeStatus[],
+  secondary: NodeStatus[],
+): NodeStatus[] {
+  const byName = new Map<string, NodeStatus>();
+  for (const node of primary) {
+    byName.set(node.node, node);
+  }
+  for (const node of secondary) {
+    const existing = byName.get(node.node);
+    byName.set(node.node, existing ? mergeNodeStats(existing, node) : node);
+  }
+  return [...byName.values()].sort((a, b) => a.node.localeCompare(b.node));
+}
+
 export async function listResources(
   serverId?: string | null,
 ): Promise<ClusterResource[]> {
   const config = await getProxmoxConfig(serverId);
   if (config.mock) return getMockResources();
 
-  // Fetch untyped + vm-typed views; some tokens populate one more completely.
-  const [all, vms] = await Promise.all([
+  const [all, vms, nodes] = await Promise.all([
     proxmoxFetch<ClusterResource[]>(config, "/cluster/resources"),
     proxmoxFetch<ClusterResource[]>(config, "/cluster/resources?type=vm").catch(
       () => [] as ClusterResource[],
     ),
+    proxmoxFetch<ClusterResource[]>(
+      config,
+      "/cluster/resources?type=node",
+    ).catch(() => [] as ClusterResource[]),
   ]);
 
   const byId = new Map<string, ClusterResource>();
-  for (const resource of [...all, ...vms]) {
+  for (const resource of [...all, ...vms, ...nodes]) {
     byId.set(resource.id, { ...byId.get(resource.id), ...resource });
   }
   return [...byId.values()];
@@ -378,24 +481,50 @@ export async function getClusterOverview(
   const config = await getProxmoxConfig(serverId);
   if (config.mock) return getMockOverview();
 
+  const warnings: string[] = [];
   const resources = await listResources(serverId);
-  const overview = buildOverview(resources, "live");
+  let overview = buildOverview(resources, "live");
 
-  const nodes = await Promise.all(
-    overview.nodes.map((node) => enrichNode(config, node)),
+  // /nodes usually returns cpu/mem/uptime even when /cluster/resources is sparse.
+  const indexed = await listNodesIndex(config);
+  if (indexed.error) {
+    warnings.push(indexed.error);
+  }
+  let nodes = mergeNodeLists(overview.nodes, indexed.nodes);
+
+  // Fill any remaining gaps from per-node /status.
+  const enriched = await Promise.all(
+    nodes.map((node) => enrichNodeFromStatus(config, node)),
   );
+  nodes = enriched.map((item) => item.node);
+  for (const item of enriched) {
+    if (item.error) warnings.push(item.error);
+  }
+
+  const stillEmpty = nodes.filter(nodeStatsMissing);
+  if (stillEmpty.length > 0) {
+    warnings.push(
+      `Node stats empty for ${stillEmpty.map((n) => n.node).join(", ")}. Grant the API token Sys.Audit on /nodes (or each node).`,
+    );
+  }
 
   let guests = overview.guests;
-  // Always merge per-node guest discovery so we don't miss VMs/LXCs that
-  // /cluster/resources omits for the API token.
   const discovered = await discoverGuests(config, nodes);
-  guests = mergeGuests(guests, discovered);
+  guests = mergeGuests(guests, discovered.guests);
+  // Only surface guest-list errors when we found no guests at all.
+  if (guests.length === 0 && discovered.errors.length > 0) {
+    warnings.push(
+      "No VMs/LXCs visible. Grant VM.Audit (and VM.PowerMgmt for power actions) on /vms or each guest.",
+    );
+    warnings.push(...discovered.errors.slice(0, 3));
+  }
 
   return {
     mode: "live",
     nodes,
     guests,
     summary: summarize(nodes, guests),
+    warnings: warnings.length ? warnings : undefined,
   };
 }
 
