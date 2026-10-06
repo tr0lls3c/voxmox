@@ -9,6 +9,7 @@ const createSchema = z.object({
   host: z.string().min(1),
   tokenId: z.string().min(1),
   tokenSecret: z.string().min(1),
+  authPassword: z.string().optional(),
   allowSelfSigned: z.boolean().optional(),
   enabled: z.boolean().optional(),
   setActive: z.boolean().optional(),

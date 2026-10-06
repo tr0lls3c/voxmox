@@ -15,6 +15,7 @@ const updateSchema = z.object({
   host: z.string().min(1).optional(),
   tokenId: z.string().min(1).optional(),
   tokenSecret: z.string().optional(),
+  authPassword: z.string().optional(),
   allowSelfSigned: z.boolean().optional(),
   enabled: z.boolean().optional(),
   setActive: z.boolean().optional(),

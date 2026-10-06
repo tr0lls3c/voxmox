@@ -11,7 +11,9 @@ const testSchema = z
     host: z.string().min(1).optional(),
     tokenId: z.string().min(1).optional(),
     tokenSecret: z.string().optional(),
+    authPassword: z.string().optional(),
     allowSelfSigned: z.boolean().optional(),
+    repair: z.boolean().optional(),
   })
   .refine(
     (value) =>
@@ -37,8 +39,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { serverId, host, tokenId, tokenSecret, allowSelfSigned } =
-      parsed.data;
+    const {
+      serverId,
+      host,
+      tokenId,
+      tokenSecret,
+      authPassword,
+      allowSelfSigned,
+      repair,
+    } = parsed.data;
 
     if (serverId) {
       const stored = await getServerById(serverId);
@@ -52,7 +61,12 @@ export async function POST(request: Request) {
           tokenSecret && tokenSecret.length > 0
             ? tokenSecret
             : stored.tokenSecret,
+        authPassword:
+          authPassword && authPassword.length > 0
+            ? authPassword
+            : stored.authPassword,
         allowSelfSigned: allowSelfSigned ?? stored.allowSelfSigned,
+        repair,
       });
       return Response.json(result, { status: result.ok ? 200 : 400 });
     }
@@ -68,7 +82,9 @@ export async function POST(request: Request) {
       host: host!,
       tokenId: tokenId!,
       tokenSecret,
+      authPassword,
       allowSelfSigned: allowSelfSigned !== false,
+      repair,
     });
     return Response.json(result, { status: result.ok ? 200 : 400 });
   } catch (error) {
