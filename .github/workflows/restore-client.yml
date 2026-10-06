@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'scripts/.restore/client.ts.zb64'
+      - 'scripts/.restore/client.ts.zb64.part*'
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -11,14 +11,17 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Decompress client.ts
+      - name: Assemble and decompress client.ts
         run: |
           python3 - <<'PY'
           import base64, zlib, pathlib
-          raw = pathlib.Path('scripts/.restore/client.ts.zb64').read_text().strip()
-          data = zlib.decompress(base64.b64decode(raw))
-          pathlib.Path('src/lib/proxmox/client.ts').write_bytes(data)
-          print('wrote', len(data), 'bytes')
+          parts = sorted(pathlib.Path('scripts/.restore').glob('client.ts.zb64.part*'))
+          zb64 = ''.join(p.read_text().strip() for p in parts)
+          data = zlib.decompress(base64.b64decode(zb64))
+          out = pathlib.Path('src/lib/proxmox/client.ts')
+          out.write_bytes(data)
+          print('parts', [p.name for p in parts])
+          print('wrote', len(data), 'bytes to', out)
           PY
       - name: Commit restored client.ts
         run: |
