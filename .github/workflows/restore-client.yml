@@ -16,8 +16,15 @@ jobs:
           python3 - <<'PY'
           import base64, zlib, pathlib, re, hashlib
           root = pathlib.Path('scripts/.restore')
+          def read_part(p: pathlib.Path) -> str:
+              a, b, c = pathlib.Path(str(p) + '.a'), pathlib.Path(str(p) + '.b'), pathlib.Path(str(p) + '.c')
+              if a.exists() and b.exists() and c.exists():
+                  return a.read_text() + b.read_text().strip('\n') + c.read_text()
+              return p.read_text().strip()
           groups = {}
           for p in sorted(root.glob('*.zb64.part*')):
+              if p.name.endswith(('.a', '.b', '.c', '.hex')):
+                  continue
               m = re.match(r'(.+)\.zb64\.part(\d+)$', p.name)
               if not m:
                   print('no-match', p.name)
@@ -40,9 +47,13 @@ jobs:
               if not dest:
                   print('skip unknown', safe)
                   continue
-              zb64 = ''.join(p.read_text().strip() for p in parts)
-              print('zb64-len', len(zb64))
-              data = zlib.decompress(base64.b64decode(zb64))
+              try:
+                  zb64 = ''.join(read_part(p) for p in parts)
+                  print('zb64-len', len(zb64))
+                  data = zlib.decompress(base64.b64decode(zb64))
+              except Exception as e:
+                  print('assemble-fail', safe, e)
+                  continue
               out = pathlib.Path(dest)
               out.parent.mkdir(parents=True, exist_ok=True)
               prev = out.read_bytes() if out.exists() else b''
