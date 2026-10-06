@@ -71,10 +71,11 @@ bash scripts/voxmox-lxc.sh
 | CT resources | 2 CPU, 2 GB RAM, 8 GB disk |
 | OS | Debian 12 (or 13) standard template |
 | App path | `/opt/voxmox` |
-| Port | `43127` (bound to `0.0.0.0` — all LXC interfaces) |
-| Service | `systemctl status voxmox` |
+| Dashboard port | `43127` (`voxmox-dashboard`, UI + control APIs) |
+| Alexa API port | `43128` (`voxmox-api`, `/api/alexa` only) |
+| Services | `systemctl status voxmox-dashboard voxmox-api` |
 
-You’ll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.
+You'll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.
 
 ### Non-interactive example
 
@@ -94,13 +95,13 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scr
 
 ```bash
 pct enter <CTID>
-systemctl status voxmox --no-pager
+systemctl status voxmox-dashboard voxmox-api --no-pager
 
 # Same pattern as other Proxmox helper scripts:
 update
 ```
 
-`update` pulls from GitHub, refreshes `/usr/bin/update` itself, skips a full OS upgrade by default (use `update --full` for that), reuses npm deps when `package-lock.json` is unchanged, rebuilds when sources change (`update --force` to always rebuild), refreshes the systemd unit, and restarts the service.
+`update` pulls from GitHub, refreshes `/usr/bin/update` itself, skips a full OS upgrade by default (use `update --full` for that), reuses npm deps when `package-lock.json` is unchanged, rebuilds when sources change (`update --force` to always rebuild), refreshes the systemd units, and restarts both services.
 
 If `update` finishes but nothing changes (old banner, no settings path, etc.), your LXC still has a pre-self-update updater. Bootstrap once:
 
@@ -109,17 +110,20 @@ curl -fsSL https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/lxc/up
   -o /usr/bin/update && chmod 755 /usr/bin/update && update --force
 ```
 
-The dashboard is bound to **all LXC interfaces** on port **43127**. From another machine on your LAN:
+Dashboard (**43127**) and Alexa API (**43128**) bind to **all LXC interfaces**. From another machine on your LAN:
 
 ```bash
 # From the Proxmox host
 pct exec <CTID> -- hostname -I
-# Then open: http://<LXC-IP>:43127
+# Dashboard: http://<LXC-IP>:43127
+# Alexa:     http://<LXC-IP>:43128/api/alexa
 ```
 
-Confirm the listen address inside the CT with `ss -tlnp | grep 43127` (you should see `0.0.0.0:43127`).
+Confirm listeners with `ss -tlnp | grep -E '43127|43128'`.
 
-Point Alexa at `https://YOUR_PUBLIC_HTTPS_HOST/api/alexa` (tunnel/proxy the CT IP on port 43127).
+For public HTTPS, point Cloudflare Tunnel (or similar) at those two ports on separate hostnames — see **Cloudflare Access** below. Skill endpoint:
+
+`https://alexa.YOUR_DOMAIN/api/alexa`
 
 ## Connect a real Proxmox cluster
 
@@ -157,37 +161,38 @@ PROXMOX_TOKEN_SECRET=your-secret
    on the saved server. Voxmox relaxes TLS per outbound Proxmox request — you do
    **not** need `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 
-Restart the app after changing env vars (`systemctl restart voxmox` in the LXC). Env credentials are used only when no enabled saved server is active.
+Restart after changing env vars (`systemctl restart voxmox-dashboard voxmox-api` in the LXC). Env credentials are used only when no enabled saved server is active.
 
 ## Alexa skill setup
 
 1. Create a custom Alexa skill in the [Alexa Developer Console](https://developer.amazon.com/alexa/console/ask).
 2. Import the interaction model from `alexa/interaction-model.json` (invocation name: **vox mox**).
-   Guest/node names use Alexa’s free-form `AMAZON.SearchQuery` slot, so you do **not** need to edit the skill when you add VMs, LXCs, or nodes. Power actions are separate intents (`StartGuestIntent`, `StopGuestIntent`, etc.) because Alexa forbids mixing a phrase slot with other slots.
-3. Expose this app on a public HTTPS URL (Cloudflare Tunnel, Tailscale Funnel, Caddy, nginx, etc.).
+   Guest/node names use Alexa's free-form `AMAZON.SearchQuery` slot, so you do **not** need to edit the skill when you add VMs, LXCs, or nodes. Power actions are separate intents (`StartGuestIntent`, `StopGuestIntent`, etc.) because Alexa forbids mixing a phrase slot with other slots.
+3. Expose the **API** port publicly over HTTPS (Cloudflare Tunnel recommended). Keep the dashboard on a separate hostname.
 4. Set the skill endpoint to:
 
 ```text
-https://YOUR_PUBLIC_HOST/api/alexa
+https://alexa.YOUR_DOMAIN/api/alexa
 ```
 
-5. Optionally set `ALEXA_SKILL_ID` to your skill’s application ID.
+5. Optionally set `ALEXA_SKILL_ID` to your skill's application ID.
 
 ### Example phrases
 
-- “Alexa, open vox mox”
-- “Alexa, ask vox mox for cluster status”
-- “Alexa, ask vox mox for node stats”
-- “Alexa, ask vox mox for stats for docker host”
-- “Alexa, ask vox mox to start pihole”
-- “Alexa, ask vox mox to shut down windows lab”
-- “Alexa, ask vox mox for performance”
+- "Alexa, open vox mox"
+- "Alexa, ask vox mox for cluster status"
+- "Alexa, ask vox mox for node stats"
+- "Alexa, ask vox mox for stats for docker host"
+- "Alexa, ask vox mox to start pihole"
+- "Alexa, ask vox mox to shut down windows lab"
+- "Alexa, ask vox mox for performance"
 
 ## API surface
 
 | Route | Purpose |
 | --- | --- |
-| `POST /api/alexa` | Alexa skill endpoint |
+| `POST /api/alexa` | Alexa skill endpoint (API mode port) |
+| `GET /api/health` | Liveness JSON |
 | `POST /api/alexa/simulate` | Dashboard simulator (`{ intent, slots }`) |
 | `GET /api/cluster` | Cluster overview JSON |
 | `GET /api/cluster/stream` | SSE live overview (shared ~4s cache) |
@@ -198,6 +203,28 @@ https://YOUR_PUBLIC_HOST/api/alexa
 | `DELETE /api/servers/:id` | Remove a server |
 | `POST /api/servers/:id/activate` | Make a server active |
 | `POST /api/servers/test` | Test credentials (`serverId` or host/token fields) |
+
+## Cloudflare Access (split hosts)
+
+LXC installs run two processes by default so you can put each behind a different Access policy:
+
+| Host (example) | Origin | Access policy |
+| --- | --- | --- |
+| `dash.example.com` | `http://<LXC-IP>:43127` | **Allow** (your login) |
+| `alexa.example.com` | `http://<LXC-IP>:43128` | **Bypass** (Everyone) — Alexa cannot send Access service-token headers |
+
+Skill URL: `https://alexa.example.com/api/alexa`
+
+Alexa auth remains Voxmox signature verification + `ALEXA_SKILL_ID`. Dashboard unlock (`VOXMOX_DASHBOARD_SECRET`) still applies on the dashboard host after you pass Access.
+
+Combined single-port mode: set `VOXMOX_SPLIT=0` at install time (uses `voxmox.service` with `VOXMOX_SERVICE_MODE=all`).
+
+Local scripts:
+
+```bash
+npm run start:dashboard   # :43127 UI + control APIs
+npm run start:api         # :43128 /api/alexa only
+```
 
 ## Security notes
 
@@ -214,8 +241,9 @@ https://YOUR_PUBLIC_HOST/api/alexa
 ## Scripts
 
 ```bash
-npm run dev    # listens on 0.0.0.0:43127 (all interfaces)
+npm run dev              # combined :43127
+npm run start:dashboard  # UI + control APIs :43127
+npm run start:api        # Alexa skill API :43128
 npm run build
-npm run start  # listens on 0.0.0.0:43127 (all interfaces)
 npm run lint
 ```
