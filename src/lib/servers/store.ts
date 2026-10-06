@@ -159,6 +159,7 @@ export function toPublicServer(
     host: server.host,
     tokenId: server.tokenId,
     hasTokenSecret: Boolean(server.tokenSecret),
+    hasAuthPassword: Boolean(server.authPassword),
     allowSelfSigned: server.allowSelfSigned,
     enabled: server.enabled,
     isActive: server.id === activeServerId,
@@ -210,6 +211,7 @@ export async function createServer(input: ServerInput): Promise<ProxmoxServerPub
     host: normalizeHost(input.host),
     tokenId: input.tokenId.trim(),
     tokenSecret: input.tokenSecret!.trim(),
+    authPassword: input.authPassword?.trim() || undefined,
     allowSelfSigned: input.allowSelfSigned !== false,
     enabled: input.enabled !== false,
     createdAt: now,
@@ -238,11 +240,17 @@ export async function updateServer(
       ? input.tokenSecret.trim()
       : current.tokenSecret;
 
+  let nextPassword = current.authPassword;
+  if (input.authPassword !== undefined) {
+    nextPassword = input.authPassword.trim() || undefined;
+  }
+
   const merged: ServerInput = {
     name: input.name ?? current.name,
     host: input.host ?? current.host,
     tokenId: input.tokenId ?? current.tokenId,
     tokenSecret: nextSecret,
+    authPassword: nextPassword,
     allowSelfSigned: input.allowSelfSigned ?? current.allowSelfSigned,
     enabled: input.enabled ?? current.enabled,
   };
@@ -254,6 +262,7 @@ export async function updateServer(
     host: normalizeHost(merged.host),
     tokenId: merged.tokenId.trim(),
     tokenSecret: nextSecret,
+    authPassword: nextPassword,
     allowSelfSigned: merged.allowSelfSigned !== false,
     enabled: merged.enabled !== false,
     updatedAt: new Date().toISOString(),
