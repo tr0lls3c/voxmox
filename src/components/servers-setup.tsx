@@ -233,11 +233,14 @@ export function ServersSetup({
       if (!res.ok || !json.ok) {
         throw new Error(json.error || "Connection test failed");
       }
-      setMessage(
-        json.version
-          ? `Connected — Proxmox ${json.version}`
-          : "Connection successful.",
-      );
+      const base = json.version
+        ? `Connected — Proxmox ${json.version}`
+        : "Connection successful.";
+      if (json.warning) {
+        setMessage(`${base}. Warning: ${json.warning}`);
+      } else {
+        setMessage(base);
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Connection test failed",
@@ -409,15 +412,24 @@ export function ServersSetup({
               Enter the Proxmox web UI base URL only (usually{" "}
               <code className="font-mono">https://host:8006</code>). Voxmox
               always calls{" "}
-              <code className="font-mono">{"{host}/api2/json/..."}</code> —
-              do not include <code className="font-mono">/api2/json</code> in
-              the field. Leave the token secret blank when editing to keep the
-              saved value.
+              <code className="font-mono">{"{host}/api2/json/..."}</code>.
+              Leave the token secret blank when editing to keep the saved
+              value.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              Proxmox API tokens default to{" "}
+              <strong className="text-foreground">Privilege Separation</strong>.
+              Effective rights are <em>user ∩ token</em> — a full-access user
+              still gets 403 Sys.Audit if the token itself has no ACL. Fix: either
+              add an ACL for{" "}
+              <code className="font-mono">user@realm!tokenid</code> on path{" "}
+              <code className="font-mono">/</code> (Administrator or PVEAuditor),
+              or edit the token and uncheck Privilege Separation.
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1.5 text-sm">
+              <label className="space-y-1.5 text-sm sm:col-span-2">
                 <span className="text-muted-foreground">Display name</span>
                 <Input
                   value={form.name}
@@ -427,7 +439,7 @@ export function ServersSetup({
                   placeholder="Home cluster"
                 />
               </label>
-              <label className="space-y-1.5 text-sm">
+              <label className="space-y-1.5 text-sm sm:col-span-2">
                 <span className="text-muted-foreground">
                   Proxmox base URL
                 </span>
@@ -546,7 +558,10 @@ export function ServersSetup({
         <CardContent className="space-y-3 text-sm leading-relaxed text-muted-foreground">
           <ol className="list-decimal space-y-2 pl-5">
             <li>
-              Create a Proxmox API token with VM/LXC audit + power privileges.
+              Create a Proxmox API token, then either disable Privilege
+              Separation on it or assign ACLs to the token itself (not only the
+              user): Sys.Audit on <code className="font-mono">/</code>, plus
+              VM.Audit / VM.PowerMgmt on <code className="font-mono">/vms</code>.
             </li>
             <li>
               Add the server above (or set env vars in{" "}
