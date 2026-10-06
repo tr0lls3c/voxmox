@@ -75,7 +75,7 @@ bash scripts/voxmox-lxc.sh
 | Alexa API port | `43128` (`voxmox-api`, `/api/alexa` only) |
 | Services | `systemctl status voxmox-dashboard voxmox-api` |
 
-You'll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.
+You’ll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.
 
 ### Non-interactive example
 
@@ -167,7 +167,7 @@ Restart after changing env vars (`systemctl restart voxmox-dashboard voxmox-api`
 
 1. Create a custom Alexa skill in the [Alexa Developer Console](https://developer.amazon.com/alexa/console/ask).
 2. Import the interaction model from `alexa/interaction-model.json` (invocation name: **vox mox**).
-   Guest/node names use Alexa's free-form `AMAZON.SearchQuery` slot, so you do **not** need to edit the skill when you add VMs, LXCs, or nodes. Power actions are separate intents (`StartGuestIntent`, `StopGuestIntent`, etc.) because Alexa forbids mixing a phrase slot with other slots.
+   Guest/node names use Alexa’s free-form `AMAZON.SearchQuery` slot, so you do **not** need to edit the skill when you add VMs, LXCs, or nodes. Power actions are separate intents (`StartGuestIntent`, `StopGuestIntent`, etc.) because Alexa forbids mixing a phrase slot with other slots.
 3. Expose the **API** port publicly over HTTPS (Cloudflare Tunnel recommended). Keep the dashboard on a separate hostname.
 4. Set the skill endpoint to:
 
@@ -175,17 +175,17 @@ Restart after changing env vars (`systemctl restart voxmox-dashboard voxmox-api`
 https://alexa.YOUR_DOMAIN/api/alexa
 ```
 
-5. Optionally set `ALEXA_SKILL_ID` to your skill's application ID.
+5. Optionally set `ALEXA_SKILL_ID` to your skill’s application ID.
 
 ### Example phrases
 
-- "Alexa, open vox mox"
-- "Alexa, ask vox mox for cluster status"
-- "Alexa, ask vox mox for node stats"
-- "Alexa, ask vox mox for stats for docker host"
-- "Alexa, ask vox mox to start pihole"
-- "Alexa, ask vox mox to shut down windows lab"
-- "Alexa, ask vox mox for performance"
+- “Alexa, open vox mox”
+- “Alexa, ask vox mox for cluster status”
+- “Alexa, ask vox mox for node stats”
+- “Alexa, ask vox mox for stats for docker host”
+- “Alexa, ask vox mox to start pihole”
+- “Alexa, ask vox mox to shut down windows lab”
+- “Alexa, ask vox mox for performance”
 
 ## API surface
 
