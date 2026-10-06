@@ -190,7 +190,7 @@ https://YOUR_PUBLIC_HOST/api/alexa
 | `POST /api/alexa` | Alexa skill endpoint |
 | `POST /api/alexa/simulate` | Dashboard simulator (`{ intent, slots }`) |
 | `GET /api/cluster` | Cluster overview JSON |
-| `POST /api/power` | Power action (`{ vmid|name, type?, action }`) |
+| `POST /api/power` | Power action (`{ vmid\|name, type?, action }`) |
 | `GET /api/servers` | List saved Proxmox servers (secrets redacted) |
 | `POST /api/servers` | Add a server |
 | `PATCH /api/servers/:id` | Edit a server (omit `tokenSecret` to keep it) |
@@ -201,10 +201,12 @@ https://YOUR_PUBLIC_HOST/api/alexa
 ## Security notes
 
 - Run this service on a host that can reach your Proxmox API; do not expose Proxmox itself publicly.
+- Set `VOXMOX_DASHBOARD_SECRET` to lock Setup / power / cluster APIs behind an unlock cookie (LXC install/update generates one at `/etc/voxmox/dashboard.secret`). Alexa `/api/alexa` stays signature-verified and does not use this secret.
 - Prefer a least-privilege API token over `root@pam`. If you keep Privilege Separation on, remember ACLs must include the **token** (`user@realm!token`), not only the user.
-- Production requests to `/api/alexa` verify Amazon's signature headers (skipped automatically in development).
+- Production always verifies Alexa signatures (`ALEXA_SKIP_SIGNATURE_VALIDATION` is ignored) and requires `ALEXA_SKILL_ID`.
 - Tokens saved in the Setup UI are written to `/var/lib/voxmox/servers.json` (mode `0600`) on LXC installs. Keep that path off shared/public storage and out of git.
 - The dashboard power buttons can change guest state — treat the public URL like any privileged control plane.
+- Cluster stats are live-polled in the UI (~5s while visible) but Proxmox calls are coalesced with a ~4s server cache + singleflight so Alexa and multiple tabs do not multiply API load.
 
 ## Scripts
 
