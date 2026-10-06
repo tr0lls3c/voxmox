@@ -487,6 +487,8 @@ print_summary() {
   echo "  pct exec ${CTID} -- systemctl status voxmox --no-pager"
   echo "  pct exec ${CTID} -- journalctl -u voxmox -f"
   echo "  pct exec ${CTID} -- update"
+  echo "  # If update looks stuck on an old script:"
+  echo "  pct exec ${CTID} -- bash -c \"curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPO}/main/scripts/lxc/update -o /usr/bin/update && chmod 755 /usr/bin/update && update --force\""
   echo
 }
 

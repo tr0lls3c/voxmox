@@ -220,15 +220,21 @@ NODE_MAJOR='${NODE_MAJOR}'
 EOF
   chmod 600 /etc/voxmox/update.conf
 
-  if [[ -f /tmp/voxmox-update.sh ]]; then
+  # Prefer the updater that shipped with the app tree (survives re-installs from git).
+  if [[ -f "${APP_DIR}/scripts/lxc/update" ]]; then
+    cp "${APP_DIR}/scripts/lxc/update" /usr/bin/update
+  elif [[ -f /tmp/voxmox-update.sh ]]; then
     cp /tmp/voxmox-update.sh /usr/bin/update
   else
-    msg "WARNING: /tmp/voxmox-update.sh missing — writing embedded updater"
-    # Fallback should not normally run; host script pushes the canonical updater.
+    msg "WARNING: updater missing — writing bootstrap stub"
     cat >/usr/bin/update <<'EOF'
 #!/usr/bin/env bash
-echo "Voxmox updater missing. Re-run the LXC installer or copy scripts/lxc/update to /usr/bin/update."
-exit 1
+set -euo pipefail
+URL="https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/lxc/update"
+echo "Bootstrapping Voxmox updater from ${URL}"
+curl -fsSL "$URL" -o /usr/bin/update
+chmod 755 /usr/bin/update
+exec /usr/bin/update "$@"
 EOF
   fi
   chmod 755 /usr/bin/update
