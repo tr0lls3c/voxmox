@@ -3,8 +3,10 @@
  *
  * Privilege-separated tokens often authenticate fine (/version, node list) while
  * /nodes/{node}/status returns 403 Sys.Audit. When we have the backing user's
- * password we can grant the token a real Administrator ACL and retry.
+ * password we can grant the token a real ACL and retry.
  */
+
+import { proxmoxTlsFetch } from "./tls-fetch";
 
 export interface TokenCredentials {
   tokenId: string;
@@ -83,12 +85,6 @@ export function buildTokenAuthorization(tokenId: string, tokenSecret: string): s
   return `PVEAPIToken=${normalized.tokenId}=${normalized.tokenSecret}`;
 }
 
-function applyTls(rejectUnauthorized: boolean): void {
-  if (!rejectUnauthorized && process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0") {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-  }
-}
-
 async function readErrorBody(response: Response): Promise<string> {
   const text = await response.text().catch(() => "");
   if (!text) return response.statusText;
@@ -111,18 +107,17 @@ export async function createTicket(input: {
   rejectUnauthorized: boolean;
   apiBase: string;
 }): Promise<TicketSession> {
-  applyTls(input.rejectUnauthorized);
-
   const body = new URLSearchParams({
     username: input.username,
     password: input.password,
   });
 
-  const response = await fetch(`${input.apiBase}/access/ticket`, {
+  const response = await proxmoxTlsFetch(`${input.apiBase}/access/ticket`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
     cache: "no-store",
+    rejectUnauthorized: input.rejectUnauthorized,
   });
 
   if (!response.ok) {
@@ -149,12 +144,29 @@ export async function createTicket(input: {
   };
 }
 
+/** Preferred least-privilege roles for dashboard + Alexa (stats + power). */
+export const VOXMOX_ACL_ROLES = "PVEAuditor,PVEVMAdmin";
+
+async function putAcl(input: {
+  apiBase: string;
+  rejectUnauthorized: boolean;
+  headers: Headers;
+  body: URLSearchParams;
+}): Promise<Response> {
+  return proxmoxTlsFetch(`${input.apiBase}/access/acl`, {
+    method: "PUT",
+    headers: input.headers,
+    body: input.body,
+    cache: "no-store",
+    rejectUnauthorized: input.rejectUnauthorized,
+  });
+}
+
 /**
- * Grant Administrator on `/` to the API token (and ensure the user has it too).
- * Must be called with an auth identity that can modify ACLs (usually a ticket
- * for root/Administrator, not a locked-down token).
+ * Grant dashboard ACL on `/` to the API token (and ensure the user has it too).
+ * Prefers PVEAuditor+PVEVMAdmin; falls back to Administrator if that write fails.
  */
-export async function grantTokenAdministrator(input: {
+export async function grantTokenDashboardAccess(input: {
   apiBase: string;
   rejectUnauthorized: boolean;
   tokenId: string;
@@ -162,9 +174,7 @@ export async function grantTokenAdministrator(input: {
   auth:
     | { kind: "token"; authorization: string }
     | { kind: "ticket"; session: TicketSession };
-}): Promise<void> {
-  applyTls(input.rejectUnauthorized);
-
+}): Promise<{ roles: string }> {
   const userId = userIdFromTokenId(input.tokenId);
   const headers = new Headers({
     "Content-Type": "application/x-www-form-urlencoded",
@@ -177,50 +187,68 @@ export async function grantTokenAdministrator(input: {
     headers.set("CSRFPreventionToken", input.auth.session.csrf);
   }
 
-  // Token ACL — this is what privilege-separated tokens need.
-  const tokenBody = new URLSearchParams({
-    path: "/",
-    roles: "Administrator",
-    tokens: input.tokenId,
-    propagate: "1",
-  });
+  const tryRoles = async (roles: string): Promise<void> => {
+    const roleList = roles.split(",").map((r) => r.trim()).filter(Boolean);
+    for (const role of roleList) {
+      const tokenBody = new URLSearchParams({
+        path: "/",
+        roles: role,
+        tokens: input.tokenId,
+        propagate: "1",
+      });
 
-  const tokenRes = await fetch(`${input.apiBase}/access/acl`, {
-    method: "PUT",
-    headers,
-    body: tokenBody,
-    cache: "no-store",
-  });
+      const tokenRes = await putAcl({
+        apiBase: input.apiBase,
+        rejectUnauthorized: input.rejectUnauthorized,
+        headers,
+        body: tokenBody,
+      });
 
-  if (!tokenRes.ok) {
-    const detail = await readErrorBody(tokenRes);
-    throw new Error(
-      `Failed to grant token ACL (${tokenRes.status}): ${detail}`,
+      if (!tokenRes.ok) {
+        const detail = await readErrorBody(tokenRes);
+        throw new Error(
+          `Failed to grant token ACL role ${role} (${tokenRes.status}): ${detail}`,
+        );
+      }
+
+      const userBody = new URLSearchParams({
+        path: "/",
+        roles: role,
+        users: userId,
+        propagate: "1",
+      });
+
+      const userRes = await putAcl({
+        apiBase: input.apiBase,
+        rejectUnauthorized: input.rejectUnauthorized,
+        headers,
+        body: userBody,
+      });
+
+      if (!userRes.ok) {
+        const detail = await readErrorBody(userRes);
+        console.warn(
+          `User ACL grant for ${role} returned ${userRes.status}: ${detail}`,
+        );
+      }
+    }
+  };
+
+  try {
+    await tryRoles(VOXMOX_ACL_ROLES);
+    return { roles: VOXMOX_ACL_ROLES };
+  } catch (leastPrivError) {
+    console.warn(
+      `Least-privilege ACL failed, falling back to Administrator:`,
+      leastPrivError instanceof Error ? leastPrivError.message : leastPrivError,
     );
-  }
-
-  // User ACL — required for privsep intersection (user ∩ token).
-  const userBody = new URLSearchParams({
-    path: "/",
-    roles: "Administrator",
-    users: userId,
-    propagate: "1",
-  });
-
-  const userRes = await fetch(`${input.apiBase}/access/acl`, {
-    method: "PUT",
-    headers,
-    body: userBody,
-    cache: "no-store",
-  });
-
-  // User grant is best-effort; token grant is the critical one.
-  if (!userRes.ok) {
-    const detail = await readErrorBody(userRes);
-    // Non-fatal if user already has rights via group membership.
-    console.warn(`User ACL grant returned ${userRes.status}: ${detail}`);
+    await tryRoles("Administrator");
+    return { roles: "Administrator" };
   }
 }
+
+/** @deprecated Use grantTokenDashboardAccess */
+export const grantTokenAdministrator = grantTokenDashboardAccess;
 
 /** True when an error looks like a Proxmox privilege failure. */
 export function isPermissionDenied(error: unknown): boolean {
@@ -243,7 +271,12 @@ export function pveumRepairHint(tokenId: string): string {
   })();
 
   return (
-    `On the Proxmox host run:\n` +
+    `On the Proxmox host run (preferred least-privilege):\n` +
+    `  pveum acl modify / -user '${userId}' -role PVEAuditor\n` +
+    `  pveum acl modify / -user '${userId}' -role PVEVMAdmin\n` +
+    `  pveum acl modify / -token '${tokenId}' -role PVEAuditor\n` +
+    `  pveum acl modify / -token '${tokenId}' -role PVEVMAdmin\n` +
+    `Fallback (full admin):\n` +
     `  pveum acl modify / -user '${userId}' -role Administrator\n` +
     `  pveum acl modify / -token '${tokenId}' -role Administrator\n` +
     `Or edit the token and disable Privilege Separation. ` +
