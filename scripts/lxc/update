@@ -1,1 +1,142 @@
-PLACEHOLDER
+#!/usr/bin/env bash
+# ==============================================================================
+# Voxmox / voxmox updater
+# Installed as /usr/bin/update inside the LXC (community-scripts style).
+# Usage (as root inside the CT):
+#   update
+#   update --full              # also apt upgrade OS packages
+#   update --force             # rebuild even if source hash matches
+#   update --set-url 'https://github.com/tr0lls3c/voxmox.git'
+#   update --set-url 'https://ghp_xxx@github.com/tr0lls3c/voxmox.git'   # private repo PAT
+#
+# If `update` looks stuck on an old version (no VOXMOX ASCII, no Data: line),
+# bootstrap the latest updater once:
+#   curl -fsSL https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/lxc/update \
+#     -o /usr/bin/update && chmod 755 /usr/bin/update && update
+# ==============================================================================
+set -euo pipefail
+
+APP="Voxmox"
+APP_DIR="${APP_DIR:-/opt/voxmox}"
+APP_USER="${APP_USER:-voxmox}"
+DATA_DIR="${DATA_DIR:-/var/lib/voxmox}"
+CONF_DIR="/etc/voxmox"
+CONF_FILE="${CONF_DIR}/update.conf"
+LOCK_HASH_FILE="${CONF_DIR}/package-lock.sha256"
+BUILD_HASH_FILE="${CONF_DIR}/build-inputs.sha256"
+RELEASE_FILE="${CONF_DIR}/source-commit"
+SERVICE_NAME="voxmox"
+DASHBOARD_SERVICE="voxmox-dashboard"
+API_SERVICE="voxmox-api"
+DEFAULT_DASHBOARD_PORT=43127
+DEFAULT_API_PORT=43128
+DEFAULT_GIT_URL="https://github.com/tr0lls3c/voxmox.git"
+RAW_UPDATE_URL="https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/lxc/update"
+FULL_OS_UPDATE=0
+FORCE_REBUILD=0
+SKIP_SELF_UPDATE="${VOXMOX_SKIP_SELF_UPDATE:-0}"
+
+YW=$'\033[33m'
+BL=$'\033[36m'
+GN=$'\033[1;92m'
+RD=$'\033[01;31m'
+CL=$'\033[m'
+BOLD=$'\033[1m'
+
+msg_info() { echo -e " ${BOLD}${YW}\u279c${CL}  $1"; }
+msg_ok() { echo -e " ${BOLD}${GN}\u2714${CL}  $1"; }
+msg_error() { echo -e " ${BOLD}${RD}\u2716${CL}  $1"; }
+header_info() {
+  clear
+  cat <<"EOF"
+#     # ####### #     # #     # ####### #     #
+#     # #     #  #   #  ##   ## #     #  #   #
+#     # #     #   # #   # # # # #     #   # #
+#     # #     #    #    #  #  # #     #    #
+ #   #  #     #   # #   #     # #     #   # #
+  # #   #     #  #   #  #     # #     #  #   #
+   #    ####### #     # #     # ####### #     #
+EOF
+  echo -e "  ${BL}${APP} updater${CL}  ${BOLD}v2${CL} (self-updating)\n"
+}
+
+die() {
+  msg_error "$1"
+  exit 1
+}
+
+load_conf() {
+  GIT_URL="${VOXMOX_GIT_URL:-}"
+  GIT_BRANCH="${GIT_BRANCH:-main}"
+  NODE_MAJOR="${NODE_MAJOR:-22}"
+
+  if [[ -f "$CONF_FILE" ]]; then
+    # shellcheck disable=SC1090
+    source "$CONF_FILE"
+  fi
+
+  [[ -n "${VOXMOX_GIT_URL:-}" ]] && GIT_URL="$VOXMOX_GIT_URL"
+  [[ -n "${GIT_BRANCH_OVERRIDE:-}" ]] && GIT_BRANCH="$GIT_BRANCH_OVERRIDE"
+
+  if [[ -z "${GIT_URL:-}" ]]; then
+    GIT_URL="$DEFAULT_GIT_URL"
+  fi
+}
+
+save_conf() {
+  mkdir -p "$CONF_DIR"
+  cat >"$CONF_FILE" <<EOF
+# Voxmox update configuration (chmod 600)
+# Generated/updated by /usr/bin/update
+GIT_URL='${GIT_URL}'
+GIT_BRANCH='${GIT_BRANCH}'
+APP_DIR='${APP_DIR}'
+APP_USER='${APP_USER}'
+NODE_MAJOR='${NODE_MAJOR:-22}'
+EOF
+  chmod 600 "$CONF_FILE"
+}
+
+ensure_root() {
+  [[ $EUID -eq 0 ]] || die "Run update as root inside the Voxmox LXC."
+}
+
+ensure_install() {
+  if [[ ! -d "$APP_DIR" || ! -f "$APP_DIR/package.json" ]]; then
+    die "No ${APP} installation found in ${APP_DIR}."
+  fi
+  if systemctl list-unit-files "${DASHBOARD_SERVICE}.service" &>/dev/null \
+    && systemctl list-unit-files "${API_SERVICE}.service" &>/dev/null; then
+    return 0
+  fi
+  if systemctl list-unit-files "${SERVICE_NAME}.service" &>/dev/null; then
+    return 0
+  fi
+  die "No voxmox systemd units found (expected ${DASHBOARD_SERVICE}/${API_SERVICE} or ${SERVICE_NAME})."
+}
+
+unit_port() {
+  local unit="$1"
+  local fallback="$2"
+  local port
+  port="$(systemctl show -p Environment --value "$unit" 2>/dev/null | tr ' ' '\n' | sed -n 's/^PORT=//p' | tail -1)"
+  echo "${port:-$fallback}"
+}
+
+split_enabled() {
+  [[ -f /etc/systemd/system/${DASHBOARD_SERVICE}.service ]] \
+    || systemctl list-unit-files "${DASHBOARD_SERVICE}.service" 2>/dev/null | grep -q "${DASHBOARD_SERVICE}.service"
+}
+
+cmd_set_url() {
+  local url="${1:-}"
+  [[ -n "$url" ]] || die "Usage: update --set-url '<git-clone-url>'"
+  load_conf
+  GIT_URL="$url"
+  save_conf
+  msg_ok "Saved update URL to ${CONF_FILE}"
+  exit 0
+}
+
+echo "PARTIAL_STUB_SEE_GITHUB_RESTORE"
+exit 1
