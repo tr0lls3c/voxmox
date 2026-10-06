@@ -1,1 +1,1 @@
-@file:/tmp/gh-updater-fix.json
+@file:/tmp/gh-updater-fix.json:README.md
