@@ -5,8 +5,14 @@
 # Usage (as root inside the CT):
 #   update
 #   update --full              # also apt upgrade OS packages
+#   update --force             # rebuild even if source hash matches
 #   update --set-url 'https://github.com/tr0lls3c/voxmox.git'
 #   update --set-url 'https://ghp_xxx@github.com/tr0lls3c/voxmox.git'   # private repo PAT
+#
+# If `update` looks stuck on an old version (no VOXMOX ASCII, no Data: line),
+# bootstrap the latest updater once:
+#   curl -fsSL https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/lxc/update \
+#     -o /usr/bin/update && chmod 755 /usr/bin/update && update
 # ==============================================================================
 set -euo pipefail
 
@@ -18,9 +24,14 @@ CONF_DIR="/etc/voxmox"
 CONF_FILE="${CONF_DIR}/update.conf"
 LOCK_HASH_FILE="${CONF_DIR}/package-lock.sha256"
 BUILD_HASH_FILE="${CONF_DIR}/build-inputs.sha256"
+RELEASE_FILE="${CONF_DIR}/source-commit"
 SERVICE_NAME="voxmox"
 DEFAULT_GIT_URL="https://github.com/tr0lls3c/voxmox.git"
+RAW_UPDATE_URL="https://raw.githubusercontent.com/tr0lls3c/voxmox/main/scripts/lxc/update"
 FULL_OS_UPDATE=0
+FORCE_REBUILD=0
+# Set by re-exec after self-update so we don't loop.
+SKIP_SELF_UPDATE="${VOXMOX_SKIP_SELF_UPDATE:-0}"
 
 YW=$'\033[33m'
 BL=$'\033[36m'
@@ -43,7 +54,7 @@ header_info() {
   # #   #     #  #   #  #     # #     #  #   #
    #    ####### #     # #     # ####### #     #
 EOF
-  echo -e "  ${BL}${APP} updater${CL}\n"
+  echo -e "  ${BL}${APP} updater${CL}  ${BOLD}v2${CL} (self-updating)\n"
 }
 
 die() {
@@ -187,13 +198,70 @@ ensure_persistent_data() {
   msg_ok "Settings dir ready (${DATA_DIR})"
 }
 
+configure_motd() {
+  local ip port
+  ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  port="$(systemctl show -p Environment --value "$SERVICE_NAME" 2>/dev/null | tr ' ' '\n' | sed -n 's/^PORT=//p' | tail -1)"
+  port="${port:-43127}"
+  cat >/etc/motd <<EOF
+
+  Voxmox LXC
+  -------------
+  Dashboard : http://${ip:-<CT-IP>}:${port}
+  Alexa     : /api/alexa
+  App dir   : ${APP_DIR}
+  Settings  : ${DATA_DIR}/servers.json
+  Service   : systemctl status voxmox
+  Update    : update
+
+EOF
+}
+
+# Replace /usr/bin/update from freshly fetched app sources, then re-exec once.
+self_update_from_app() {
+  local src="${APP_DIR}/scripts/lxc/update"
+  local dest="/usr/bin/update"
+
+  [[ -f "$src" ]] || return 0
+  [[ "$SKIP_SELF_UPDATE" == "1" ]] && return 0
+
+  if cmp -s "$src" "$dest" 2>/dev/null; then
+    msg_ok "Updater script already current"
+    return 0
+  fi
+
+  msg_info "Updating /usr/bin/update from fetched sources (re-exec)"
+  cp "$src" "$dest"
+  chmod 755 "$dest"
+  ln -sfn /usr/bin/update /usr/local/bin/update
+  ln -sfn /usr/bin/update /usr/local/bin/voxmox-update
+
+  # Re-run the new updater for build/restart; skip a second git clone.
+  local -a args=()
+  [[ "$FULL_OS_UPDATE" == "1" ]] && args+=(--full)
+  [[ "$FORCE_REBUILD" == "1" ]] && args+=(--force)
+  exec env \
+    VOXMOX_SKIP_SELF_UPDATE=1 \
+    VOXMOX_ALREADY_FETCHED=1 \
+    "$dest" "${args[@]}"
+}
+
 fetch_latest() {
+  if [[ "${VOXMOX_ALREADY_FETCHED:-0}" == "1" ]]; then
+    SOURCE_COMMIT="$(head -1 "$RELEASE_FILE" 2>/dev/null || cat "${APP_DIR}/.voxmox-release" 2>/dev/null || echo unknown)"
+    msg_ok "Sources already synced (commit ${SOURCE_COMMIT}) — continuing after updater self-refresh"
+    ensure_persistent_data
+    return 0
+  fi
+
   [[ -n "${GIT_URL:-}" ]] || die "No git URL configured. Run: update --set-url 'https://github.com/tr0lls3c/voxmox.git'"
 
   # Snapshot settings before touching app files.
   ensure_persistent_data
 
-  msg_info "Fetching ${APP} (${GIT_BRANCH}) from git"
+  local safe_url
+  safe_url="$(echo "$GIT_URL" | sed -E 's#https://[^@/]+@#https://#')"
+  msg_info "Fetching ${APP} (${GIT_BRANCH}) from ${safe_url}"
   TMP="$(mktemp -d)"
   # shellcheck disable=SC2064
   trap "rm -rf '$TMP'" EXIT
@@ -208,7 +276,19 @@ For a public GitHub repo:
   update --set-url 'https://github.com/tr0lls3c/voxmox.git'
 
 For a private GitHub repo (classic PAT with repo scope):
-  update --set-url 'https://ghp_YOUR_PAT@github.com/tr0lls3c/voxmox.git'"
+  update --set-url 'https://ghp_YOUR_PAT@github.com/tr0lls3c/voxmox.git'
+
+If this updater itself looks ancient (no VOXMOX ASCII banner):
+  curl -fsSL ${RAW_UPDATE_URL} -o /usr/bin/update && chmod 755 /usr/bin/update && update"
+  fi
+
+  SOURCE_COMMIT="$(git -C "$TMP/src" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  SOURCE_SUBJECT="$(git -C "$TMP/src" log -1 --pretty=%s 2>/dev/null || echo '')"
+  msg_ok "Cloned commit ${SOURCE_COMMIT}${SOURCE_SUBJECT:+ — ${SOURCE_SUBJECT}}"
+
+  # Sanity check: refuse to deploy an empty/broken tree.
+  if [[ ! -f "$TMP/src/package.json" || ! -d "$TMP/src/src" ]]; then
+    die "Clone at ${GIT_URL} is missing package.json or src/ — wrong repository?"
   fi
 
   rm -rf "$TMP/src/.git"
@@ -221,13 +301,20 @@ For a private GitHub repo (classic PAT with repo scope):
     --exclude data \
     "$TMP/src/" "$APP_DIR/"
 
+  # Persist release marker for debugging ("what am I running?").
+  mkdir -p "$CONF_DIR"
+  printf '%s\n%s\n' "$SOURCE_COMMIT" "${SOURCE_SUBJECT}" >"$RELEASE_FILE"
+  printf '%s\n' "$SOURCE_COMMIT" >"${APP_DIR}/.voxmox-release"
+
   # Re-assert persistence after rsync (never let app tree own the source of truth).
   ensure_persistent_data
   chown -R "$APP_USER:$APP_USER" "$APP_DIR"
-  # data dir ownership again in case chown -R somehow touched a bind-mount (it shouldn't).
   chown "$APP_USER:$APP_USER" "$DATA_DIR" 2>/dev/null || true
   [[ -f "$DATA_DIR/servers.json" ]] && chown "$APP_USER:$APP_USER" "$DATA_DIR/servers.json"
-  msg_ok "Application files updated"
+  msg_ok "Application files synced to ${APP_DIR}"
+
+  # Critical: refresh /usr/bin/update itself (was missing before — caused stale updaters).
+  self_update_from_app
 }
 
 lockfile_hash() {
@@ -238,14 +325,25 @@ lockfile_hash() {
   fi
 }
 
-# Hash of inputs that affect `next build` output.
+# Hash of inputs that affect `next build` output + release commit.
 build_inputs_hash() {
   (
     cd "$APP_DIR" || exit 1
-    # shellcheck disable=SC2038
-    find src public package.json package-lock.json next.config.ts tsconfig.json \
-      postcss.config.mjs components.json app 2>/dev/null \
-      -type f | sort | xargs sha256sum 2>/dev/null | sha256sum | awk '{print $1}'
+    {
+      cat .voxmox-release 2>/dev/null || true
+      find src -type f 2>/dev/null
+      for f in public package.json package-lock.json next.config.ts tsconfig.json \
+        postcss.config.mjs components.json; do
+        if [[ -d "$f" ]]; then
+          find "$f" -type f 2>/dev/null
+        elif [[ -f "$f" ]]; then
+          printf '%s\n' "$f"
+        fi
+      done
+    } | sort -u | while IFS= read -r f; do
+      [[ -f "$f" ]] || continue
+      sha256sum "$f"
+    done | sha256sum | awk '{print $1}'
   )
 }
 
@@ -255,13 +353,14 @@ install_deps_and_build() {
   new_hash="$(lockfile_hash)"
   prev_hash="$(cat "$LOCK_HASH_FILE" 2>/dev/null || true)"
 
-  if [[ -d node_modules ]] && [[ -n "$prev_hash" ]] && [[ "$new_hash" == "$prev_hash" ]]; then
+  if [[ "$FORCE_REBUILD" != "1" && -d node_modules && -n "$prev_hash" && "$new_hash" == "$prev_hash" ]]; then
     msg_ok "Dependencies unchanged — skipping npm ci"
   else
     msg_info "Installing npm dependencies"
     if [[ -f package-lock.json ]]; then
       runuser -u "$APP_USER" -- npm ci --prefer-offline --no-audit --no-fund
     else
+      msg_info "No package-lock.json in tree — using npm install"
       runuser -u "$APP_USER" -- npm install --no-audit --no-fund
     fi
     mkdir -p "$CONF_DIR"
@@ -273,7 +372,7 @@ install_deps_and_build() {
   build_hash="$(build_inputs_hash)"
   prev_build="$(cat "$BUILD_HASH_FILE" 2>/dev/null || true)"
 
-  if [[ -d .next ]] && [[ -n "$prev_build" ]] && [[ "$build_hash" == "$prev_build" ]]; then
+  if [[ "$FORCE_REBUILD" != "1" && -d .next && -n "$prev_build" && "$build_hash" == "$prev_build" ]]; then
     msg_ok "App sources unchanged — skipping next build"
   else
     msg_info "Building ${APP}"
@@ -338,6 +437,37 @@ restart_service() {
   die "${SERVICE_NAME} failed to start — check: journalctl -u ${SERVICE_NAME} -n 100"
 }
 
+verify_deploy() {
+  msg_info "Verifying deploy"
+  local missing=0
+  local f
+  for f in \
+    "$APP_DIR/package.json" \
+    "$APP_DIR/src/lib/servers/store.ts" \
+    "$APP_DIR/scripts/lxc/update" \
+    "$APP_DIR/.next/BUILD_ID" \
+    /usr/bin/update
+  do
+    if [[ ! -e "$f" ]]; then
+      msg_error "Missing: $f"
+      missing=1
+    fi
+  done
+
+  if ! grep -q 'self_update_from_app\|VOXMOX_SKIP_SELF_UPDATE\|updater.*v2' /usr/bin/update 2>/dev/null; then
+    msg_error "/usr/bin/update does not look like the self-updating v2 script"
+    missing=1
+  fi
+
+  if ! grep -q 'SYSTEM_DATA_DIR\|/var/lib/voxmox' "$APP_DIR/src/lib/servers/store.ts" 2>/dev/null; then
+    msg_error "App sources lack persistent settings support — wrong tree synced?"
+    missing=1
+  fi
+
+  [[ "$missing" == "0" ]] || die "Deploy verification failed — update did not apply cleanly."
+  msg_ok "Deploy verification passed (commit $(cat "$RELEASE_FILE" 2>/dev/null | head -1 || echo '?'))"
+}
+
 run_update() {
   header_info
   ensure_root
@@ -358,16 +488,20 @@ run_update() {
   fetch_latest
   install_deps_and_build
   restart_service
+  configure_motd
   save_conf
+  verify_deploy
 
   echo
   msg_ok "Updated ${APP} successfully!"
-  local safe_url
+  local safe_url release
   safe_url="$(echo "$GIT_URL" | sed -E 's#https://[^@/]+@#https://#')"
+  release="$(head -1 "$RELEASE_FILE" 2>/dev/null || echo unknown)"
   echo -e "  ${BOLD}App:${CL}     ${APP_DIR}"
   echo -e "  ${BOLD}Data:${CL}    ${DATA_DIR}  (servers.json — survives updates/reboots)"
   echo -e "  ${BOLD}Source:${CL}  ${safe_url}"
   echo -e "  ${BOLD}Branch:${CL}  ${GIT_BRANCH}"
+  echo -e "  ${BOLD}Commit:${CL}  ${release}"
   echo -e "  ${BOLD}Service:${CL} systemctl status ${SERVICE_NAME}"
   echo
 }
@@ -377,14 +511,20 @@ usage() {
 Usage: update [options]
 
 Update ${APP} (voxmox) application code, npm dependencies, and restart the service.
+Also refreshes /usr/bin/update itself from the fetched tree.
 
 Options:
   --full            Also run apt update/upgrade (slow; off by default)
+  --force           Always reinstall deps and rebuild (ignore hash caches)
   --set-url <url>   Save the git clone URL used for future updates
   -h, --help        Show this help
 
+Bootstrap a stuck/old updater:
+  curl -fsSL ${RAW_UPDATE_URL} -o /usr/bin/update && chmod 755 /usr/bin/update && update
+
 Examples:
   update
+  update --force
   update --full
   update --set-url 'https://github.com/tr0lls3c/voxmox.git'
   update --set-url 'https://ghp_YOUR_PAT@github.com/tr0lls3c/voxmox.git'
@@ -392,25 +532,32 @@ EOF
 }
 
 main() {
-  case "${1:-}" in
-    -h | --help)
-      usage
-      ;;
-    --full)
-      FULL_OS_UPDATE=1
-      run_update
-      ;;
-    --set-url)
-      cmd_set_url "${2:-}"
-      ;;
-    "")
-      run_update
-      ;;
-    *)
-      usage
-      die "Unknown option: $1"
-      ;;
-  esac
+  local -a passthrough=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h | --help)
+        usage
+        exit 0
+        ;;
+      --full)
+        FULL_OS_UPDATE=1
+        shift
+        ;;
+      --force)
+        FORCE_REBUILD=1
+        shift
+        ;;
+      --set-url)
+        cmd_set_url "${2:-}"
+        ;;
+      *)
+        usage
+        die "Unknown option: $1"
+        ;;
+    esac
+  done
+
+  run_update
 }
 
 main "$@"
