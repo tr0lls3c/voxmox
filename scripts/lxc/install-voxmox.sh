@@ -5,6 +5,10 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/voxmox}"
 APP_USER="${APP_USER:-voxmox}"
 APP_PORT="${APP_PORT:-43127}"
+DASHBOARD_PORT="${DASHBOARD_PORT:-$APP_PORT}"
+API_PORT="${API_PORT:-43128}"
+# 1 = separate dashboard + Alexa API ports (recommended for Cloudflare Access)
+VOXMOX_SPLIT="${VOXMOX_SPLIT:-1}"
 DATA_DIR="${DATA_DIR:-/var/lib/voxmox}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
 GIT_URL="${GIT_URL:-https://github.com/tr0lls3c/voxmox.git}"
@@ -147,7 +151,9 @@ PROXMOX_ALLOW_SELF_SIGNED=true
 NODE_TLS_REJECT_UNAUTHORIZED=0
 ALEXA_SKILL_ID=${ALEXA_SKILL_ID}
 ALEXA_SKIP_SIGNATURE_VALIDATION=false
-PORT=${APP_PORT}
+PORT=${DASHBOARD_PORT}
+API_PORT=${API_PORT}
+VOXMOX_SPLIT=${VOXMOX_SPLIT}
 VOXMOX_DATA_DIR=${DATA_DIR}
 VOXMOX_DASHBOARD_SECRET=$(openssl rand -hex 24)
 EOF
@@ -176,11 +182,65 @@ build_app() {
 }
 
 install_systemd() {
-  msg "Installing systemd unit"
-  if [[ -f /tmp/voxmox.service ]]; then
-    cp /tmp/voxmox.service /etc/systemd/system/voxmox.service
+  msg "Installing systemd unit(s)"
+  local app_dir_esc user_esc
+  app_dir_esc="$APP_DIR"
+  user_esc="$APP_USER"
+
+  install_unit_from_template() {
+    local src="$1"
+    local dest="$2"
+    local dash_port="$3"
+    local api_port="$4"
+    local combined_port="$5"
+    if [[ -f "$src" ]]; then
+      cp "$src" "$dest"
+    elif [[ -f "/tmp/$(basename "$src")" ]]; then
+      cp "/tmp/$(basename "$src")" "$dest"
+    else
+      return 1
+    fi
+    sed -i \
+      -e "s|__APP_DIR__|${app_dir_esc}|g" \
+      -e "s|__APP_USER__|${user_esc}|g" \
+      -e "s|__DASHBOARD_PORT__|${dash_port}|g" \
+      -e "s|__API_PORT__|${api_port}|g" \
+      -e "s|__APP_PORT__|${combined_port}|g" \
+      "$dest"
+  }
+
+  if [[ "$VOXMOX_SPLIT" == "1" ]]; then
+    install_unit_from_template \
+      "${APP_DIR}/scripts/lxc/voxmox-dashboard.service" \
+      /etc/systemd/system/voxmox-dashboard.service \
+      "$DASHBOARD_PORT" "$API_PORT" "$DASHBOARD_PORT" \
+      || install_unit_from_template \
+        /tmp/voxmox-dashboard.service \
+        /etc/systemd/system/voxmox-dashboard.service \
+        "$DASHBOARD_PORT" "$API_PORT" "$DASHBOARD_PORT"
+
+    install_unit_from_template \
+      "${APP_DIR}/scripts/lxc/voxmox-api.service" \
+      /etc/systemd/system/voxmox-api.service \
+      "$DASHBOARD_PORT" "$API_PORT" "$DASHBOARD_PORT" \
+      || install_unit_from_template \
+        /tmp/voxmox-api.service \
+        /etc/systemd/system/voxmox-api.service \
+        "$DASHBOARD_PORT" "$API_PORT" "$DASHBOARD_PORT"
+
+    systemctl daemon-reload
+    # Stop legacy combined unit if present
+    if systemctl list-unit-files voxmox.service >/dev/null 2>&1; then
+      systemctl disable --now voxmox.service 2>/dev/null || true
+    fi
+    systemctl enable --now voxmox-dashboard.service voxmox-api.service
   else
-    cat >/etc/systemd/system/voxmox.service <<EOF
+    if [[ -f /tmp/voxmox.service ]]; then
+      cp /tmp/voxmox.service /etc/systemd/system/voxmox.service
+    elif [[ -f "${APP_DIR}/scripts/lxc/voxmox.service" ]]; then
+      cp "${APP_DIR}/scripts/lxc/voxmox.service" /etc/systemd/system/voxmox.service
+    else
+      cat >/etc/systemd/system/voxmox.service <<EOF
 [Unit]
 Description=Voxmox Alexa + Proxmox dashboard
 After=network-online.target
@@ -192,10 +252,11 @@ User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
 Environment=NODE_ENV=production
-Environment=PORT=${APP_PORT}
+Environment=PORT=${DASHBOARD_PORT}
+Environment=VOXMOX_SERVICE_MODE=all
 Environment=VOXMOX_DATA_DIR=${DATA_DIR}
 EnvironmentFile=-${APP_DIR}/.env
-ExecStart=${APP_DIR}/node_modules/.bin/next start -H 0.0.0.0 -p ${APP_PORT}
+ExecStart=${APP_DIR}/node_modules/.bin/next start -H 0.0.0.0 -p ${DASHBOARD_PORT}
 Restart=on-failure
 RestartSec=3
 TimeoutStartSec=30
@@ -203,17 +264,16 @@ TimeoutStartSec=30
 [Install]
 WantedBy=multi-user.target
 EOF
+    fi
+    sed -i \
+      -e "s|__APP_DIR__|${APP_DIR}|g" \
+      -e "s|__APP_USER__|${APP_USER}|g" \
+      -e "s|__APP_PORT__|${DASHBOARD_PORT}|g" \
+      /etc/systemd/system/voxmox.service
+    systemctl daemon-reload
+    systemctl disable --now voxmox-dashboard.service voxmox-api.service 2>/dev/null || true
+    systemctl enable --now voxmox.service
   fi
-
-  # Substitute placeholders if the unit file uses them
-  sed -i \
-    -e "s|__APP_DIR__|${APP_DIR}|g" \
-    -e "s|__APP_USER__|${APP_USER}|g" \
-    -e "s|__APP_PORT__|${APP_PORT}|g" \
-    /etc/systemd/system/voxmox.service
-
-  systemctl daemon-reload
-  systemctl enable --now voxmox.service
 }
 
 install_update_helper() {
@@ -259,18 +319,35 @@ EOF
 }
 
 configure_motd() {
-  cat >/etc/motd <<EOF
+  local ip
+  ip="$(hostname -I | awk '{print $1}')"
+  if [[ "$VOXMOX_SPLIT" == "1" ]]; then
+    cat >/etc/motd <<EOF
 
   Voxmox LXC
   -------------
-  Dashboard : http://$(hostname -I | awk '{print $1}'):${APP_PORT}
-  Alexa     : /api/alexa
+  Dashboard : http://${ip}:${DASHBOARD_PORT}
+  Alexa API : http://${ip}:${API_PORT}/api/alexa
+  App dir   : ${APP_DIR}
+  Settings  : ${DATA_DIR}/servers.json
+  Services  : systemctl status voxmox-dashboard voxmox-api
+  Update    : update
+
+EOF
+  else
+    cat >/etc/motd <<EOF
+
+  Voxmox LXC
+  -------------
+  Dashboard : http://${ip}:${DASHBOARD_PORT}
+  Alexa     : http://${ip}:${DASHBOARD_PORT}/api/alexa
   App dir   : ${APP_DIR}
   Settings  : ${DATA_DIR}/servers.json
   Service   : systemctl status voxmox
   Update    : update
 
 EOF
+  fi
 }
 
 main() {
@@ -286,13 +363,21 @@ main() {
   install_update_helper
   configure_motd
 
-  # Brief readiness check
   sleep 2
-  if systemctl is-active --quiet voxmox; then
-    msg "voxmox.service is active"
+  if [[ "$VOXMOX_SPLIT" == "1" ]]; then
+    if systemctl is-active --quiet voxmox-dashboard && systemctl is-active --quiet voxmox-api; then
+      msg "voxmox-dashboard + voxmox-api are active"
+    else
+      msg "WARNING: split services not fully active — check: journalctl -u voxmox-dashboard -u voxmox-api -n 100"
+      systemctl --no-pager --full status voxmox-dashboard voxmox-api || true
+    fi
   else
-    msg "WARNING: voxmox.service is not active yet — check: journalctl -u voxmox -n 100"
-    systemctl --no-pager --full status voxmox || true
+    if systemctl is-active --quiet voxmox; then
+      msg "voxmox.service is active"
+    else
+      msg "WARNING: voxmox.service is not active yet — check: journalctl -u voxmox -n 100"
+      systemctl --no-pager --full status voxmox || true
+    fi
   fi
   msg "Install finished"
 }
