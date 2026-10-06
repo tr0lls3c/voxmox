@@ -1,6 +1,8 @@
 import { handleAlexaRequest } from "@/lib/alexa/handler";
 import type { RequestEnvelope } from "ask-sdk-model";
 import { z } from "zod";
+import { requireDashboardAuth } from "@/lib/security/dashboard-auth";
+import { clientKey, rateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -57,6 +59,16 @@ function buildEnvelope(
 }
 
 export async function POST(request: Request) {
+  // Simulator bypasses Alexa crypto — never leave it open anonymously in prod.
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
+  const limited = rateLimit(clientKey(request, "alexa-sim"), {
+    limit: 60,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   let json: unknown;
   try {
     json = await request.json();

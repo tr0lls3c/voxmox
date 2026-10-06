@@ -13,10 +13,17 @@ function envFlag(name: string, fallback = false): boolean {
 }
 
 export function shouldSkipAlexaVerification(): boolean {
-  return (
-    envFlag("ALEXA_SKIP_SIGNATURE_VALIDATION", false) ||
-    process.env.NODE_ENV === "development"
-  );
+  const skipFlag = envFlag("ALEXA_SKIP_SIGNATURE_VALIDATION", false);
+  // Never skip signature checks in production — fail closed.
+  if (process.env.NODE_ENV === "production") {
+    if (skipFlag) {
+      console.error(
+        "ALEXA_SKIP_SIGNATURE_VALIDATION is set but ignored in production.",
+      );
+    }
+    return false;
+  }
+  return skipFlag || process.env.NODE_ENV === "development";
 }
 
 export async function verifyAlexaRequest(options: {

@@ -1,11 +1,18 @@
 import { handleAlexaRequest } from "@/lib/alexa/handler";
 import { verifyAlexaRequest } from "@/lib/alexa/verify";
 import type { RequestEnvelope } from "ask-sdk-model";
+import { clientKey, rateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const limited = rateLimit(clientKey(request, "alexa"), {
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   const body = await request.text();
 
   try {
@@ -29,14 +36,21 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const skillId = process.env.ALEXA_SKILL_ID;
-  if (
-    skillId &&
-    envelope.session?.application?.applicationId &&
-    envelope.session.application.applicationId !== skillId &&
-    envelope.context?.System?.application?.applicationId !== skillId
-  ) {
-    return Response.json({ error: "Unexpected skill ID" }, { status: 403 });
+  const skillId = process.env.ALEXA_SKILL_ID?.trim();
+  if (process.env.NODE_ENV === "production" && !skillId) {
+    console.error("ALEXA_SKILL_ID is required in production.");
+    return Response.json(
+      { error: "Alexa skill is not configured." },
+      { status: 503 },
+    );
+  }
+
+  if (skillId) {
+    const sessionId = envelope.session?.application?.applicationId;
+    const contextId = envelope.context?.System?.application?.applicationId;
+    if (sessionId !== skillId && contextId !== skillId) {
+      return Response.json({ error: "Unexpected skill ID" }, { status: 403 });
+    }
   }
 
   const response = await handleAlexaRequest(envelope);
