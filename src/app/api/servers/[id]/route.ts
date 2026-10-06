@@ -6,6 +6,8 @@ import {
   updateServer,
   readServersConfig,
 } from "@/lib/servers";
+import { requireDashboardAuth } from "@/lib/security/dashboard-auth";
+import { clientKey, rateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +25,10 @@ const updateSchema = z.object({
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
   const { id } = await context.params;
   try {
     const config = await readServersConfig();
@@ -46,6 +51,15 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
+  const limited = rateLimit(clientKey(request, "servers-write"), {
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   const { id } = await context.params;
   let json: unknown;
   try {
@@ -74,7 +88,16 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
+  const limited = rateLimit(clientKey(request, "servers-write"), {
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   const { id } = await context.params;
   try {
     const existing = await getServerById(id);

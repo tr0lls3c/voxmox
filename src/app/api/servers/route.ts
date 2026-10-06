@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { createServer, listServersPublic } from "@/lib/servers";
+import { requireDashboardAuth } from "@/lib/security/dashboard-auth";
+import { clientKey, rateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,10 +17,18 @@ const createSchema = z.object({
   setActive: z.boolean().optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
   try {
     const data = await listServersPublic();
-    return Response.json(data);
+    // Avoid advertising filesystem layout to the browser beyond Setup needs.
+    return Response.json({
+      activeServerId: data.activeServerId,
+      servers: data.servers,
+      configPath: data.configPath,
+    });
   } catch (error) {
     console.error("List servers error:", error);
     return Response.json(
@@ -32,6 +42,15 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
+  const limited = rateLimit(clientKey(request, "servers-write"), {
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   let json: unknown;
   try {
     json = await request.json();
