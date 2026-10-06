@@ -15,7 +15,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const loginSchema = z.object({
-  secret: z.string().min(1),
+  secret: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1)),
 });
 
 export async function GET(request: Request) {
@@ -76,19 +79,19 @@ export async function POST(request: Request) {
     { ok: true },
     {
       headers: {
-        "Set-Cookie": buildDashboardAuthCookie(secret),
+        "Set-Cookie": buildDashboardAuthCookie(secret, request),
         "Cache-Control": "no-store",
       },
     },
   );
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   return Response.json(
     { ok: true },
     {
       headers: {
-        "Set-Cookie": clearDashboardAuthCookie(),
+        "Set-Cookie": clearDashboardAuthCookie(request),
         "Cache-Control": "no-store",
       },
     },

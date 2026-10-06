@@ -47,13 +47,22 @@ function safeEqualHex(a: string, b: string): boolean {
   }
 }
 
+function safeEqualString(a: string, b: string): boolean {
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
+
 export function tokenMatchesSecret(token: string | null | undefined): boolean {
   const secret = getDashboardSecret();
   if (!secret || !token) return false;
+  const normalized = token.trim();
+  if (!normalized) return false;
   const expected = hashSecret(secret);
   // Accept raw secret or its hash (cookie stores hash).
-  if (token === secret) return true;
-  return safeEqualHex(token, expected) || token === expected;
+  if (safeEqualString(normalized, secret)) return true;
+  return safeEqualHex(normalized, expected) || normalized === expected;
 }
 
 export function dashboardCookieValue(secret: string): string {
@@ -117,15 +126,40 @@ export function requireDashboardAuth(request: Request): Response | null {
   return unauthorizedDashboardResponse();
 }
 
-export function buildDashboardAuthCookie(secret: string): string {
-  const value = encodeURIComponent(dashboardCookieValue(secret));
-  const secure =
-    process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `${COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=2592000${secure}`;
+/** True when the client reached us over HTTPS (direct or via proxy). */
+export function requestIsHttps(request?: Request | null): boolean {
+  if (!request) return false;
+  try {
+    if (new URL(request.url).protocol === "https:") return true;
+  } catch {
+    // ignore bad URL
+  }
+  const forwarded = request.headers.get("x-forwarded-proto");
+  if (forwarded) {
+    const first = forwarded.split(",")[0]?.trim().toLowerCase();
+    if (first === "https") return true;
+    if (first === "http") return false;
+  }
+  return false;
 }
 
-export function clearDashboardAuthCookie(): string {
-  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`;
+/**
+ * Session cookie after unlock.
+ * Only set Secure when the request is HTTPS — LAN LXC installs are typically
+ * plain HTTP, and a Secure cookie would be dropped by the browser.
+ */
+export function buildDashboardAuthCookie(
+  secret: string,
+  request?: Request | null,
+): string {
+  const value = encodeURIComponent(dashboardCookieValue(secret));
+  const secure = requestIsHttps(request) ? "; Secure" : "";
+  return `${COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure}`;
+}
+
+export function clearDashboardAuthCookie(request?: Request | null): string {
+  const secure = requestIsHttps(request) ? "; Secure" : "";
+  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
 export { COOKIE_NAME };
