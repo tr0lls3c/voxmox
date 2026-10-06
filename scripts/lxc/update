@@ -121,7 +121,7 @@ unit_port() {
   local unit="$1"
   local fallback="$2"
   local port
-  port="$(systemctl show -p Environment --value "$unit" 2>/dev/null | tr ' ' '\n' | sed -n 's/^PORT=//p' | tall -1)"
+  port="$(systemctl show -p Environment --value "$unit" 2>/dev/null | tr ' ' '\n' | sed -n 's/^PORT=//p' | tail -1)"
   echo "${port:-$fallback}"
 }
 
