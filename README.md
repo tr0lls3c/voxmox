@@ -128,20 +128,20 @@ Saved servers live in `/var/lib/voxmox/servers.json` (override with `$VOXMOX_DAT
 ### From environment variables (fallback)
 
 1. In Proxmox, create an API token (Datacenter → Permissions → API Tokens).
-2. **Privilege Separation** is enabled by default. Effective rights are
-   **user ∩ token** — even if the user is Administrator / “full access”, the
-   token still needs its own ACL (or turn Privilege Separation **off** on that
-   token). Assign roles to `user@realm!tokenid`, not only to the user:
-   - Path `/` (or `/nodes`): role **Administrator** or **PVEAuditor** (needs `Sys.Audit` for node CPU/RAM/uptime)
-   - Path `/vms`: `VM.Audit`, `VM.PowerMgmt` (list guests + power actions)
-   Without token-level `Sys.Audit`, `/version` and cluster listing may work while
-   `/nodes/*/status` returns **403** and the dashboard shows 0% / 0 B stats.
+2. If the dashboard shows **403 Sys.Audit** / empty node stats, open **Setup**,
+   enter the **user password** for the account that owns the token, and click
+   **Repair token access**. Voxmox logs in as that user and grants the token
+   Administrator on `/` (this is the reliable fix when Privilege Separation is
+   on). You can also disable Privilege Separation on the token in Proxmox, or run:
+   `pveum acl modify / -token 'user@realm!token' -role Administrator`
 3. Set in `.env.local` (dev) or `/opt/voxmox/.env` (LXC):
 
 ```env
 PROXMOX_HOST=https://your-proxmox-host:8006
 PROXMOX_TOKEN_ID=user@pam!token-name
 PROXMOX_TOKEN_SECRET=your-secret
+# Optional — enables automatic ACL repair on 403 Sys.Audit
+# PROXMOX_AUTH_PASSWORD=your-user-password
 ```
 
 4. For typical self-signed Proxmox TLS certificates, also set:
