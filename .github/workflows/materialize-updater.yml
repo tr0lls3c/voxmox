@@ -14,32 +14,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Decode full scripts/lxc/update
+      - name: Fix known part1 corruption then decode
         run: |
           mkdir -p scripts/lxc
           python3 - <<'PY'
-          import base64, gzip, pathlib, re
-          parts_dir = pathlib.Path(".github/restore-parts")
-          part_files = sorted(parts_dir.glob("upd_part_*.txt"), key=lambda p: int(p.stem.split("_")[-1]))
-          if len(part_files) >= 9:
-              b64 = "".join(p.read_text().strip() for p in part_files)
-              data = base64.b64decode(b64)
-              print("assembled from", len(part_files), "parts")
-          else:
-              raw = pathlib.Path(".github/artifacts/update.gz.b64").read_text()
-              raw = re.sub(r"\s+", "", raw)
-              data = gzip.decompress(base64.b64decode(raw))
-              print("decoded from gzip artifact")
-          assert b"self_update_from_app" in data, "missing self_update_from_app"
-          assert b"restore-parts" in data, "missing restore-parts"
+          import base64, pathlib
+          p = pathlib.Path(".github/restore-parts/upd_part_1.txt")
+          t = p.read_text()
+          if "YWxsIC0x" in t and "YWlsIC0x" not in t:
+              t = t.replace("YWxsIC0x", "YWlsIC0x", 1)
+              p.write_text(t)
+              print("fixed part1 YWxs->YWls")
+          parts = sorted(
+              pathlib.Path(".github/restore-parts").glob("upd_part_*.txt"),
+              key=lambda x: int(x.stem.split("_")[-1]),
+          )
+          assert len(parts) >= 9, f"need 9 parts, got {len(parts)}"
+          b64 = "".join(x.read_text().strip() for x in parts)
+          data = base64.b64decode(b64)
+          assert b"self_update_from_app" in data
+          assert b"restore-parts" in data
+          assert b"| tall -1" not in data, "corrupt tall still present"
+          assert b"| tail -1" in data
           head = b"\n".join(data.splitlines()[:3])
-          assert b"Temporary bootstrap" not in head, "looks like Temporary bootstrap stub"
+          assert b"Temporary bootstrap" not in head
           pathlib.Path("scripts/lxc/update").write_bytes(data)
           pathlib.Path("scripts/lxc/update").chmod(0o755)
           print("wrote", len(data), "bytes")
           PY
-      - name: Commit materialized updater
+      - name: Commit materialized updater and fixed part1
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Fix updater: ship full scripts/lxc/update (no self-overwrite stub)"
-          file_pattern: scripts/lxc/update
+          file_pattern: scripts/lxc/update .github/restore-parts/upd_part_1.txt
