@@ -117,6 +117,15 @@ write_env() {
     else
       printf '\nVOXMOX_DATA_DIR=%s\n' "$DATA_DIR" >>"$env_file"
     fi
+    if ! grep -q '^VOXMOX_DASHBOARD_SECRET=.+\' "$env_file"; then
+      local secret
+      secret="$(openssl rand -hex 24)"
+      printf '\nVOXMOX_DASHBOARD_SECRET=%s\n' "$secret" >>"$env_file"
+      mkdir -p /etc/voxmox
+      printf '%s\n' "$secret" >/etc/voxmox/dashboard.secret
+      chmod 600 /etc/voxmox/dashboard.secret
+      msg "Generated dashboard secret → /etc/voxmox/dashboard.secret"
+    fi
     chown "$APP_USER:$APP_USER" "$env_file"
     chmod 640 "$env_file"
     return
@@ -140,9 +149,14 @@ ALEXA_SKILL_ID=${ALEXA_SKILL_ID}
 ALEXA_SKIP_SIGNATURE_VALIDATION=false
 PORT=${APP_PORT}
 VOXMOX_DATA_DIR=${DATA_DIR}
+VOXMOX_DASHBOARD_SECRET=$(openssl rand -hex 24)
 EOF
   chmod 640 "$env_file"
   chown "$APP_USER:$APP_USER" "$env_file"
+  mkdir -p /etc/voxmox
+  sed -n 's/^VOXMOX_DASHBOARD_SECRET=//p' "$env_file" | tail -1 >/etc/voxmox/dashboard.secret
+  chmod 600 /etc/voxmox/dashboard.secret
+  msg "Dashboard unlock secret saved to /etc/voxmox/dashboard.secret"
 }
 
 build_app() {
