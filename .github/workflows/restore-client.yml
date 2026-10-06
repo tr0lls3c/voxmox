@@ -17,13 +17,23 @@ jobs:
           import base64, zlib, pathlib, re, hashlib
           root = pathlib.Path('scripts/.restore')
           def read_part(p: pathlib.Path) -> str:
-              a, b, c = pathlib.Path(str(p) + '.a'), pathlib.Path(str(p) + '.b'), pathlib.Path(str(p) + '.c')
-              if a.exists() and b.exists() and c.exists():
-                  return a.read_text() + b.read_text().strip('\n') + c.read_text()
+              letters = 'abcdefghijklmnopqrstuvwxyz'
+              overlays = []
+              for ch in letters:
+                  op = pathlib.Path(str(p) + '.' + ch)
+                  if op.exists():
+                      overlays.append(op.read_text().rstrip('\n'))
+                  elif overlays:
+                      break
+              if overlays:
+                  return ''.join(overlays)
+              hx = pathlib.Path(str(p) + '.hex')
+              if hx.exists():
+                  return bytes.fromhex(hx.read_text().strip()).decode('ascii')
               return p.read_text().strip()
           groups = {}
           for p in sorted(root.glob('*.zb64.part*')):
-              if p.name.endswith(('.a', '.b', '.c', '.hex')):
+              if re.search(r'\.[a-z]$', p.name) or p.name.endswith('.hex'):
                   continue
               m = re.match(r'(.+)\.zb64\.part(\d+)$', p.name)
               if not m:
