@@ -117,7 +117,7 @@ write_env() {
     else
       printf '\nVOXMOX_DATA_DIR=%s\n' "$DATA_DIR" >>"$env_file"
     fi
-    if ! grep -qE '^VOXMOX_DASHBOARD_SECRET=.+$' "$env_file"; then
+    if ! grep -q '^VOXMOX_DASHBOARD_SECRET=.\+' "$env_file"; then
       local secret
       secret="$(openssl rand -hex 24)"
       printf '\nVOXMOX_DASHBOARD_SECRET=%s\n' "$secret" >>"$env_file"

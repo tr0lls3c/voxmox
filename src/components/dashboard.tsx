@@ -183,26 +183,97 @@ export function Dashboard() {
     })();
   }, [load, refreshAuth]);
 
-  // Live soft-poll while Cluster tab is visible — server cache collapses Proxmox load.
+  // Live updates via SSE (falls back to soft-poll). Server cache collapses Proxmox load.
   useEffect(() => {
     if (!live || tab !== "cluster") return;
     if (auth?.required && !auth.authenticated) return;
 
     let cancelled = false;
-    const tick = () => {
+    let source: EventSource | null = null;
+    let pollId: number | null = null;
+
+    const applyPayload = (json: ClusterResponse) => {
       if (cancelled) return;
-      if (document.visibilityState !== "visible") return;
-      void load({ soft: true });
+      setData(json);
+      setLastUpdated(Date.now());
+      setError(null);
     };
 
-    const id = window.setInterval(tick, POLL_MS);
-    const onVis = () => {
-      if (document.visibilityState === "visible") tick();
+    const startPoll = () => {
+      if (pollId != null) return;
+      const tick = () => {
+        if (cancelled) return;
+        if (document.visibilityState !== "visible") return;
+        void load({ soft: true });
+      };
+      pollId = window.setInterval(tick, POLL_MS);
     };
+
+    const stopPoll = () => {
+      if (pollId != null) {
+        window.clearInterval(pollId);
+        pollId = null;
+      }
+    };
+
+    const connectSse = () => {
+      if (cancelled || document.visibilityState !== "visible") return;
+      if (typeof EventSource === "undefined") {
+        startPoll();
+        return;
+      }
+
+      source?.close();
+      source = new EventSource("/api/cluster/stream");
+
+      source.addEventListener("overview", (event) => {
+        try {
+          const json = JSON.parse((event as MessageEvent).data) as ClusterResponse;
+          applyPayload(json);
+          stopPoll();
+        } catch {
+          // ignore malformed frames
+        }
+      });
+
+      source.addEventListener("cluster-error", (event) => {
+        try {
+          const json = JSON.parse((event as MessageEvent).data) as {
+            error?: string;
+          };
+          if (json.error) setError(json.error);
+        } catch {
+          // ignore
+        }
+      });
+
+      source.onerror = () => {
+        if (cancelled) return;
+        // EventSource auto-reconnects; soft-poll bridges the gap.
+        startPoll();
+      };
+
+      source.onopen = () => {
+        stopPoll();
+      };
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === "visible") {
+        connectSse();
+      } else {
+        source?.close();
+        source = null;
+        stopPoll();
+      }
+    };
+
+    connectSse();
     document.addEventListener("visibilitychange", onVis);
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      source?.close();
+      stopPoll();
       document.removeEventListener("visibilitychange", onVis);
     };
   }, [live, tab, load, auth]);
@@ -725,8 +796,8 @@ export function Dashboard() {
 
         <footer className="flex items-center gap-2 pb-4 text-xs text-muted-foreground">
           <HardDrive className="size-3.5" />
-          Stats refresh live while this tab is visible; Proxmox calls are cached
-          server-side (~4s) so multiple polls share one fan-out.
+          Stats stream live over SSE while this tab is visible; Proxmox calls are
+          cached server-side (~4s) so every client shares one fan-out.
         </footer>
       </main>
     </div>
