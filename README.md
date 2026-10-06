@@ -74,7 +74,7 @@ bash scripts/voxmox-lxc.sh
 | Port | `43127` (bound to `0.0.0.0` — all LXC interfaces) |
 | Service | `systemctl status voxmox` |
 
-You’ll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.
+You'll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.
 
 ### Non-interactive example
 
@@ -163,7 +163,7 @@ Restart the app after changing env vars (`systemctl restart voxmox` in the LXC).
 
 1. Create a custom Alexa skill in the [Alexa Developer Console](https://developer.amazon.com/alexa/console/ask).
 2. Import the interaction model from `alexa/interaction-model.json` (invocation name: **vox mox**).
-   Guest/node names use Alexa’s free-form `AMAZON.SearchQuery` slot, so you do **not** need to edit the skill when you add VMs, LXCs, or nodes. Power actions are separate intents (`StartGuestIntent`, `StopGuestIntent`, etc.) because Alexa forbids mixing a phrase slot with other slots.
+   Guest/node names use Alexa's free-form `AMAZON.SearchQuery` slot, so you do **not** need to edit the skill when you add VMs, LXCs, or nodes. Power actions are separate intents (`StartGuestIntent`, `StopGuestIntent`, etc.) because Alexa forbids mixing a phrase slot with other slots.
 3. Expose this app on a public HTTPS URL (Cloudflare Tunnel, Tailscale Funnel, Caddy, nginx, etc.).
 4. Set the skill endpoint to:
 
@@ -171,17 +171,17 @@ Restart the app after changing env vars (`systemctl restart voxmox` in the LXC).
 https://YOUR_PUBLIC_HOST/api/alexa
 ```
 
-5. Optionally set `ALEXA_SKILL_ID` to your skill’s application ID.
+5. Optionally set `ALEXA_SKILL_ID` to your skill's application ID.
 
 ### Example phrases
 
-- “Alexa, open vox mox”
-- “Alexa, ask vox mox for cluster status”
-- “Alexa, ask vox mox for node stats”
-- “Alexa, ask vox mox for stats for docker host”
-- “Alexa, ask vox mox to start pihole”
-- “Alexa, ask vox mox to shut down windows lab”
-- “Alexa, ask vox mox for performance”
+- "Alexa, open vox mox"
+- "Alexa, ask vox mox for cluster status"
+- "Alexa, ask vox mox for node stats"
+- "Alexa, ask vox mox for stats for docker host"
+- "Alexa, ask vox mox to start pihole"
+- "Alexa, ask vox mox to shut down windows lab"
+- "Alexa, ask vox mox for performance"
 
 ## API surface
 
@@ -190,7 +190,7 @@ https://YOUR_PUBLIC_HOST/api/alexa
 | `POST /api/alexa` | Alexa skill endpoint |
 | `POST /api/alexa/simulate` | Dashboard simulator (`{ intent, slots }`) |
 | `GET /api/cluster` | Cluster overview JSON |
-| `POST /api/power` | Power action (`{ vmid\|name, type?, action }`) |
+| `POST /api/power` | Power action (`{ vmid|name, type?, action }`) |
 | `GET /api/servers` | List saved Proxmox servers (secrets redacted) |
 | `POST /api/servers` | Add a server |
 | `PATCH /api/servers/:id` | Edit a server (omit `tokenSecret` to keep it) |
@@ -202,7 +202,7 @@ https://YOUR_PUBLIC_HOST/api/alexa
 
 - Run this service on a host that can reach your Proxmox API; do not expose Proxmox itself publicly.
 - Prefer a least-privilege API token over `root@pam`. If you keep Privilege Separation on, remember ACLs must include the **token** (`user@realm!token`), not only the user.
-- Production requests to `/api/alexa` verify Amazon’s signature headers (skipped automatically in development).
+- Production requests to `/api/alexa` verify Amazon's signature headers (skipped automatically in development).
 - Tokens saved in the Setup UI are written to `/var/lib/voxmox/servers.json` (mode `0600`) on LXC installs. Keep that path off shared/public storage and out of git.
 - The dashboard power buttons can change guest state — treat the public URL like any privileged control plane.
 
