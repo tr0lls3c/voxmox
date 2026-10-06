@@ -357,10 +357,12 @@ install_deps_and_build() {
     msg_ok "Dependencies unchanged — skipping npm ci"
   else
     msg_info "Installing npm dependencies"
-    if [[ -f package-lock.json ]]; then
+    # Require a real lockfile (reject tiny/corrupt placeholders from bad publishes).
+    if [[ -f package-lock.json ]] && [[ "$(wc -c <package-lock.json)" -gt 1000 ]] &&
+      grep -q '"lockfileVersion"' package-lock.json 2>/dev/null; then
       runuser -u "$APP_USER" -- npm ci --prefer-offline --no-audit --no-fund
     else
-      msg_info "No package-lock.json in tree — using npm install"
+      msg_info "No usable package-lock.json — using npm install"
       runuser -u "$APP_USER" -- npm install --no-audit --no-fund
     fi
     mkdir -p "$CONF_DIR"
