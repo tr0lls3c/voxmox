@@ -20,8 +20,10 @@ jobs:
           for p in sorted(root.glob('*.zb64.part*')):
               m = re.match(r'(.+)\.zb64\.part(\d+)$', p.name)
               if not m:
+                  print('no-match', p.name)
                   continue
               groups.setdefault(m.group(1), []).append((int(m.group(2)), p))
+              print('match', p.name, m.group(1), m.group(2))
           MAP = {
             'client.ts': 'src/lib/proxmox/client.ts',
             'src__components__dashboard.tsx': 'src/components/dashboard.tsx',
@@ -31,35 +33,46 @@ jobs:
             'package-lock.json': 'package-lock.json',
           }
           changed = []
-          for safe, parts in groups.items():
+          for safe, parts in sorted(groups.items()):
               parts = [p for _, p in sorted(parts)]
               dest = MAP.get(safe)
+              print('group', safe, 'parts', len(parts), 'dest', dest)
               if not dest:
                   print('skip unknown', safe)
                   continue
               zb64 = ''.join(p.read_text().strip() for p in parts)
+              print('zb64-len', len(zb64))
               data = zlib.decompress(base64.b64decode(zb64))
               out = pathlib.Path(dest)
               out.parent.mkdir(parents=True, exist_ok=True)
-              if out.exists() and out.read_bytes() == data:
-                  print('unchanged', dest, len(data), hashlib.sha256(data).hexdigest()[:12])
-                  continue
+              prev = out.read_bytes() if out.exists() else b''
+              print('dest', dest, 'prev', len(prev), hashlib.sha256(prev).hexdigest()[:12], 'new', len(data), hashlib.sha256(data).hexdigest()[:12], 'same', prev == data)
               out.write_bytes(data)
-              changed.append(dest)
-              print('wrote', dest, len(data), hashlib.sha256(data).hexdigest()[:12])
-          pathlib.Path('/tmp/changed.txt').write_text('\n'.join(changed))
-          print('changed_count', len(changed))
+              if prev != data:
+                  changed.append(dest)
+                  print('wrote', dest)
+              else:
+                  print('unchanged', dest)
+          pathlib.Path('changed.txt').write_text('\n'.join(changed) + ('\n' if changed else ''))
+          print('changed_count', len(changed), changed)
           PY
       - name: Commit restored files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ ! -s /tmp/changed.txt ]; then echo "No changes"; exit 0; fi
-          while IFS= read -r f; do git add "$f"; done < /tmp/changed.txt
+          echo "changed.txt:"; cat -A changed.txt || true
+          if [ ! -s changed.txt ]; then echo "No changes"; exit 0; fi
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            echo "adding $f"
+            git add -- "$f"
+          done < changed.txt
+          git status
+          git diff --cached --stat
           git diff --cached --quiet && echo "No staged changes" && exit 0
-          if grep -qx 'package-lock.json' /tmp/changed.txt && [ "$(wc -l < /tmp/changed.txt)" -eq 1 ]; then
+          if grep -qx 'package-lock.json' changed.txt && [ "$(grep -c . changed.txt)" -eq 1 ]; then
             msg="prod: refresh package-lock.json"
-          elif grep -qE 'dashboard|servers-setup|lxc' /tmp/changed.txt; then
+          elif grep -qE 'dashboard|servers-setup|lxc' changed.txt; then
             msg="prod: dashboard SSE client + LXC scripts"
           else
             msg="prod: SSE cluster stream + proxmox auth/client hardening"
