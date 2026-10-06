@@ -316,7 +316,377 @@ export function ServersSetup({
 
   return (
     <div className="space-y-4">
-      {/* TRUNCATED_FOR_PUSH - will fail if truncated */}
+      <Card className="border-border/60 bg-card/70 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle>Proxmox servers</CardTitle>
+          <CardDescription>
+            Add, edit, or remove API endpoints from this dashboard. Credentials
+            persist across updates and reboots in{" "}
+            <code className="font-mono">
+              {configPath ?? "/var/lib/voxmox/servers.json"}
+            </code>
+            . Env vars still work as a fallback.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <Badge
+              className={
+                mock
+                  ? undefined
+                  : "bg-[var(--accent-glow)] text-slate-950 hover:bg-[var(--accent-glow)]"
+              }
+              variant={mock ? "secondary" : "default"}
+            >
+              {mock ? "Demo" : "Live"}
+            </Badge>
+            <span>{sourceLabel}</span>
+            {activeHost ? (
+              <>
+                <span>·</span>
+                <code className="font-mono text-foreground">{activeHost}</code>
+              </>
+            ) : null}
+            {apiBase ? (
+              <>
+                <span>·</span>
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  calls {apiBase}/…
+                </span>
+              </>
+            ) : null}
+          </div>
+
+          {error ? (
+            <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {error}
+            </div>
+          ) : null}
+          {message ? (
+            <div className="rounded-xl border border-[var(--accent-glow)]/30 bg-[var(--accent-glow)]/10 px-4 py-3 text-sm text-foreground">
+              {message}
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-muted-foreground">
+              {loading
+                ? "Loading servers…"
+                : servers.length === 0
+                  ? "No saved servers yet."
+                  : `${servers.length} saved server${servers.length === 1 ? "" : "s"}`}
+            </p>
+            <Button size="sm" onClick={startCreate}>
+              <Plus className="size-4" />
+              Add server
+            </Button>
+          </div>
+
+          <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/60">
+            {servers.map((server) => (
+              <div
+                key={server.id}
+                className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-medium">{server.name}</p>
+                    {server.isActive ? (
+                      <Badge className="bg-[var(--accent-glow)] text-slate-950 hover:bg-[var(--accent-glow)]">
+                        Active
+                      </Badge>
+                    ) : null}
+                    {!server.enabled ? (
+                      <Badge variant="secondary">Disabled</Badge>
+                    ) : null}
+                  </div>
+                  <p className="truncate font-mono text-xs text-muted-foreground">
+                    {server.host}
+                  </p>
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    {server.tokenId}
+                    {server.hasTokenSecret ? " · secret saved" : " · no secret"}
+                    {server.hasAuthPassword ? " · password saved" : ""}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {!server.isActive && server.enabled ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void activateServer(server)}
+                    >
+                      <Check className="size-4" />
+                      Use
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={testing}
+                    onClick={() => void testConnection({ serverId: server.id })}
+                  >
+                    <Zap className="size-4" />
+                    Test
+                  </Button>
+                  {server.hasAuthPassword ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={repairing}
+                      onClick={() =>
+                        void repairAccess({ serverId: server.id })
+                      }
+                    >
+                      {repairing ? "Repairing…" : "Repair"}
+                    </Button>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => startEdit(server)}
+                  >
+                    <Pencil className="size-4" />
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={removingId === server.id}
+                    onClick={() => void removeServer(server)}
+                  >
+                    <Trash2 className="size-4" />
+                    {removingId === server.id ? "Removing…" : "Remove"}
+                  </Button>
+                </div>
+              </div>
+            ))}
+            {!loading && servers.length === 0 ? (
+              <p className="px-4 py-6 text-sm text-muted-foreground">
+                Add your first Proxmox API URL and token to leave demo mode.
+              </p>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      {showForm ? (
+        <Card className="border-border/60 bg-card/70 backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2">
+          <CardHeader>
+            <CardTitle>
+              {editingId ? "Edit server" : "Add Proxmox server"}
+            </CardTitle>
+            <CardDescription>
+              Enter the Proxmox web UI base URL only (usually{" "}
+              <code className="font-mono">https://host:8006</code>). Voxmox
+              always calls{" "}
+              <code className="font-mono">{"{host}/api2/json/..."}</code>.
+              Leave the token secret blank when editing to keep the saved
+              value.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-xl border border-border/60 bg-secondary/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              If node stats return 403 Sys.Audit, enter the{" "}
+              <strong className="text-foreground">user password</strong> for the
+              account that owns the token (the part before{" "}
+              <code className="font-mono">!</code>) and click{" "}
+              <strong className="text-foreground">Repair token access</strong>.
+              Voxmox will grant Administrator on{" "}
+              <code className="font-mono">/</code> to the token via the Proxmox
+              API.
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1.5 text-sm sm:col-span-2">
+                <span className="text-muted-foreground">Display name</span>
+                <Input
+                  value={form.name}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, name: e.target.value }))
+                  }
+                  placeholder="Home cluster"
+                />
+              </label>
+              <label className="space-y-1.5 text-sm sm:col-span-2">
+                <span className="text-muted-foreground">
+                  Proxmox base URL
+                </span>
+                <Input
+                  value={form.host}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, host: e.target.value }))
+                  }
+                  placeholder="https://192.168.1.10:8006"
+                  className="font-mono"
+                />
+              </label>
+              <label className="space-y-1.5 text-sm">
+                <span className="text-muted-foreground">Token ID</span>
+                <Input
+                  value={form.tokenId}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, tokenId: e.target.value }))
+                  }
+                  placeholder="root@pam!voxmox"
+                  className="font-mono"
+                />
+              </label>
+              <label className="space-y-1.5 text-sm">
+                <span className="text-muted-foreground">
+                  Token secret
+                  {editingId ? " (leave blank to keep)" : ""}
+                </span>
+                <Input
+                  type="password"
+                  value={form.tokenSecret}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      tokenSecret: e.target.value,
+                    }))
+                  }
+                  placeholder={editingId ? "••••••••" : "xxxxxxxx-xxxx-…"}
+                  className="font-mono"
+                  autoComplete="off"
+                />
+              </label>
+              <label className="space-y-1.5 text-sm sm:col-span-2">
+                <span className="text-muted-foreground">
+                  User password for ACL repair
+                  {editingId ? " (leave blank to keep)" : " (optional)"}
+                </span>
+                <Input
+                  type="password"
+                  value={form.authPassword}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      authPassword: e.target.value,
+                    }))
+                  }
+                  placeholder={
+                    editingId
+                      ? "••••••••"
+                      : "Password for user@realm (not the token secret)"
+                  }
+                  autoComplete="off"
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-col gap-2 text-sm sm:flex-row sm:flex-wrap sm:gap-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[var(--accent-glow)]"
+                  checked={form.allowSelfSigned}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      allowSelfSigned: e.target.checked,
+                    }))
+                  }
+                />
+                Allow self-signed TLS
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[var(--accent-glow)]"
+                  checked={form.enabled}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      enabled: e.target.checked,
+                    }))
+                  }
+                />
+                Enabled
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-[var(--accent-glow)]"
+                  checked={form.setActive}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      setActive: e.target.checked,
+                    }))
+                  }
+                />
+                Make active after save
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => void saveServer()} disabled={saving}>
+                {saving ? "Saving…" : editingId ? "Save changes" : "Add server"}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={testing || repairing}
+                onClick={() => void testConnection()}
+              >
+                {testing ? "Testing…" : "Test connection"}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={testing || repairing}
+                onClick={() =>
+                  void repairAccess(
+                    editingId ? { serverId: editingId } : undefined,
+                  )
+                }
+              >
+                {repairing ? "Repairing…" : "Repair token access"}
+              </Button>
+              <Button variant="outline" onClick={cancelForm} disabled={saving}>
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card className="border-border/60 bg-card/70 backdrop-blur-sm">
+        <CardHeader>
+          <CardTitle>Alexa endpoint</CardTitle>
+          <CardDescription>
+            Skill path: <code className="font-mono">/api/alexa</code>
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm leading-relaxed text-muted-foreground">
+          <ol className="list-decimal space-y-2 pl-5">
+            <li>
+              Create a Proxmox API token. If stats show 403, add the owning
+              user’s password above and click Repair token access (or disable
+              Privilege Separation on the token in Proxmox).
+            </li>
+            <li>
+              Add the server above (or set env vars in{" "}
+              <code className="font-mono">.env.local</code> /{" "}
+              <code className="font-mono">.env</code>).
+            </li>
+            <li>
+              Expose this app over HTTPS (Cloudflare Tunnel, Tailscale Funnel,
+              or a reverse proxy).
+            </li>
+            <li>
+              In Alexa Developer Console, import{" "}
+              <code className="font-mono">alexa/interaction-model.json</code>{" "}
+              and point the endpoint to{" "}
+              <code className="font-mono">https://your-host/api/alexa</code>.
+            </li>
+          </ol>
+          <p>
+            Example:{" "}
+            <span className="text-foreground">
+              “Alexa, ask vox mox to start docker host.”
+            </span>
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
