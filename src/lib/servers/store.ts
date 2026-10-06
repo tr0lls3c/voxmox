@@ -85,7 +85,13 @@ async function pathExists(target: string): Promise<boolean> {
 }
 
 async function ensureDataDir(): Promise<void> {
-  await mkdir(getDataDir(), { recursive: true });
+  await mkdir(getDataDir(), { recursive: true, mode: 0o750 });
+  try {
+    const { chmod } = await import("node:fs/promises");
+    await chmod(getDataDir(), 0o750);
+  } catch {
+    // Best-effort on platforms that ignore mode.
+  }
 }
 
 /**
