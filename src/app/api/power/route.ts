@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { findGuest, powerGuest } from "@/lib/proxmox";
 import type { GuestType, PowerAction } from "@/lib/proxmox";
+import { requireDashboardAuth } from "@/lib/security/dashboard-auth";
+import { clientKey, rateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +15,15 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
+  const limited = rateLimit(clientKey(request, "power"), {
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   let json: unknown;
   try {
     json = await request.json();
