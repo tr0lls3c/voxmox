@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +26,7 @@ import {
   Box,
   Cpu,
   HardDrive,
+  Lock,
   Mic,
   RefreshCw,
   Server,
@@ -33,8 +40,23 @@ interface ClusterResponse {
   source?: "server" | "env" | "mock";
   serverName?: string | null;
   overview: ClusterOverview;
+  cache?: {
+    hit: boolean;
+    fetchedAt: number;
+    ageMs: number;
+    ttlMs: number;
+  };
   error?: string;
 }
+
+interface AuthStatus {
+  required: boolean;
+  configured: boolean;
+  authenticated: boolean;
+  insecureProduction?: boolean;
+}
+
+const POLL_MS = 5_000;
 
 function formatBytesShort(bytes: number): string {
   if (!bytes) return "0 B";
@@ -87,6 +109,12 @@ const SIMULATIONS = [
   { label: "Performance", intent: "PerformanceIntent" },
 ] as const;
 
+function formatUptime(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  return `${d}d ${h}h`;
+}
+
 export function Dashboard() {
   const [data, setData] = useState<ClusterResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,25 +123,89 @@ export function Dashboard() {
   const [simulating, setSimulating] = useState(false);
   const [customUtterance, setCustomUtterance] = useState("cluster status");
   const [pending, startTransition] = useTransition();
+  const [tab, setTab] = useState("cluster");
+  const [live, setLive] = useState(true);
+  const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const [unlockSecret, setUnlockSecret] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/cluster", { cache: "no-store" });
-      const json = (await res.json()) as ClusterResponse & { error?: string };
-      if (!res.ok) throw new Error(json.error || "Failed to load cluster");
-      setData(json);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load cluster");
-    } finally {
-      setLoading(false);
-    }
+  const refreshAuth = useCallback(async () => {
+    const res = await fetch("/api/auth", { cache: "no-store" });
+    const json = (await res.json()) as AuthStatus;
+    setAuth(json);
+    return json;
   }, []);
 
+  const load = useCallback(
+    async (opts?: { fresh?: boolean; soft?: boolean }) => {
+      if (!opts?.soft) setLoading(true);
+      setError(null);
+      try {
+        const qs = opts?.fresh ? "?fresh=1" : "";
+        const res = await fetch(`/api/cluster${qs}`, { cache: "no-store" });
+        const json = (await res.json()) as ClusterResponse & {
+          error?: string;
+          code?: string;
+        };
+        if (res.status === 401) {
+          setAuth((prev) =>
+            prev
+              ? { ...prev, authenticated: false, required: true }
+              : {
+                  required: true,
+                  configured: json.code !== "DASHBOARD_SECRET_MISSING",
+                  authenticated: false,
+                },
+          );
+          throw new Error(json.error || "Unauthorized");
+        }
+        if (!res.ok) throw new Error(json.error || "Failed to load cluster");
+        setData(json);
+        setLastUpdated(Date.now());
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load cluster");
+      } finally {
+        if (!opts?.soft) setLoading(false);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    void (async () => {
+      try {
+        await refreshAuth();
+      } catch {
+        // ignore
+      }
+      await load();
+    })();
+  }, [load, refreshAuth]);
+
+  // Live soft-poll while Cluster tab is visible — server cache collapses Proxmox load.
+  useEffect(() => {
+    if (!live || tab !== "cluster") return;
+    if (auth?.required && !auth.authenticated) return;
+
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      if (document.visibilityState !== "visible") return;
+      void load({ soft: true });
+    };
+
+    const id = window.setInterval(tick, POLL_MS);
+    const onVis = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [live, tab, load, auth]);
 
   const overview = data?.overview;
 
@@ -122,6 +214,27 @@ export function Dashboard() {
     const lxcs = overview?.guests.filter((g) => g.type === "lxc") ?? [];
     return { vms, lxcs };
   }, [overview]);
+
+  async function unlock() {
+    setUnlocking(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret: unlockSecret }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Unlock failed");
+      setUnlockSecret("");
+      await refreshAuth();
+      await load({ fresh: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unlock failed");
+    } finally {
+      setUnlocking(false);
+    }
+  }
 
   async function runPower(guest: GuestStatus, action: PowerAction) {
     startTransition(async () => {
@@ -140,7 +253,7 @@ export function Dashboard() {
         setError(json.error || "Power action failed");
         return;
       }
-      await load();
+      await load({ fresh: true, soft: true });
     });
   }
 
@@ -156,7 +269,7 @@ export function Dashboard() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Simulation failed");
       setSpeech(json.speech ?? "No speech returned.");
-      await load();
+      await load({ soft: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Simulation failed");
     } finally {
@@ -223,6 +336,8 @@ export function Dashboard() {
     await simulate("ClusterStatusIntent");
   }
 
+  const needsUnlock = Boolean(auth?.required && !auth.authenticated);
+
   return (
     <div className="relative min-h-full">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -264,17 +379,66 @@ export function Dashboard() {
                 Live Proxmox
               </Badge>
             )}
+            {live && tab === "cluster" && !needsUnlock ? (
+              <Badge variant="secondary" className="font-mono text-[10px]">
+                live · {POLL_MS / 1000}s
+                {data?.cache?.hit ? " · cached" : ""}
+              </Badge>
+            ) : null}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void load()}
-              disabled={loading || pending}
+              onClick={() => setLive((v) => !v)}
+              disabled={needsUnlock}
             >
-              <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+              {live ? "Pause live" : "Resume live"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void load({ fresh: true })}
+              disabled={loading || pending || needsUnlock}
+            >
+              <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
               Refresh
             </Button>
           </div>
         </header>
+
+        {needsUnlock ? (
+          <Card className="border-[var(--accent-glow)]/40 bg-card/80 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Lock className="size-4 text-[var(--accent-glow)]" />
+                Unlock dashboard
+              </CardTitle>
+              <CardDescription>
+                {auth?.configured
+                  ? "Enter VOXMOX_DASHBOARD_SECRET to access control-plane APIs."
+                  : "Production mode requires VOXMOX_DASHBOARD_SECRET in .env (or set VOXMOX_ALLOW_ANONYMOUS=1 on a trusted LAN)."}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row">
+              <Input
+                type="password"
+                value={unlockSecret}
+                onChange={(e) => setUnlockSecret(e.target.value)}
+                placeholder="Dashboard secret"
+                className="font-mono sm:max-w-sm"
+                autoComplete="off"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void unlock();
+                }}
+              />
+              <Button
+                onClick={() => void unlock()}
+                disabled={unlocking || !unlockSecret.trim() || !auth?.configured}
+              >
+                {unlocking ? "Unlocking…" : "Unlock"}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {error ? (
           <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
@@ -282,12 +446,21 @@ export function Dashboard() {
           </div>
         ) : null}
 
-        {overview?.warnings && overview.warnings.length > 0 ? (
-          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+        {auth?.insecureProduction ? (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-foreground">
+            Production mode has no{" "}
+            <code className="font-mono">VOXMOX_DASHBOARD_SECRET</code>. Set one
+            (LXC <code className="font-mono">update</code> auto-generates it) so
+            the control plane is not open on the network.
+          </div>
+        ) : null}
+
+        {overview?.warnings?.length ? (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-foreground">
             <p className="mb-1 font-medium text-amber-200">Proxmox API warnings</p>
-            <ul className="list-disc space-y-1 pl-5 text-amber-100/90">
+            <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
               {overview.warnings.map((warning) => (
-                <li key={warning} className="font-mono text-xs leading-relaxed">
+                <li key={warning} className="whitespace-pre-wrap break-words">
                   {warning}
                 </li>
               ))}
@@ -295,137 +468,196 @@ export function Dashboard() {
           </div>
         ) : null}
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            {
-              label: "Nodes online",
-              value: overview
-                ? `${overview.summary.onlineNodes}/${overview.summary.nodeCount}`
-                : "—",
-              icon: Server,
-            },
-            {
-              label: "Virtual machines",
-              value: overview?.summary.vmCount ?? "—",
-              icon: HardDrive,
-            },
-            {
-              label: "Containers",
-              value: overview?.summary.lxcCount ?? "—",
-              icon: Box,
-            },
-            {
-              label: "Guests running",
-              value: overview?.summary.runningGuests ?? "—",
-              icon: Activity,
-            },
-          ].map((stat, index) => (
-            <Card
-              key={stat.label}
-              className="border-border/60 bg-card/70 backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2"
-              style={{ animationDelay: `${index * 60}ms`, animationFillMode: "both" }}
-            >
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardDescription>{stat.label}</CardDescription>
-                <stat.icon className="size-4 text-[var(--accent-glow)]" />
-              </CardHeader>
-              <CardContent>
-                <p className="font-mono text-3xl font-semibold tracking-tight">
-                  {loading && !overview ? "…" : stat.value}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </section>
-
-        <Tabs defaultValue="cluster" className="gap-4">
-          <TabsList className="bg-secondary/70">
+        <Tabs value={tab} onValueChange={setTab} className="gap-6">
+          <TabsList>
             <TabsTrigger value="cluster">Cluster</TabsTrigger>
             <TabsTrigger value="alexa">Alexa simulator</TabsTrigger>
             <TabsTrigger value="setup">Setup</TabsTrigger>
           </TabsList>
 
           <TabsContent value="cluster" className="space-y-6">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {[
+                {
+                  label: "Nodes online",
+                  value: overview
+                    ? `${overview.summary.onlineNodes}/${overview.summary.nodeCount}`
+                    : "—",
+                  icon: Server,
+                },
+                {
+                  label: "Virtual machines",
+                  value: overview?.summary.vmCount ?? "—",
+                  icon: Cpu,
+                },
+                {
+                  label: "Containers",
+                  value: overview?.summary.lxcCount ?? "—",
+                  icon: Box,
+                },
+                {
+                  label: "Guests running",
+                  value: overview?.summary.runningGuests ?? "—",
+                  icon: Activity,
+                },
+              ].map((stat) => (
+                <Card
+                  key={stat.label}
+                  className="border-border/60 bg-card/70 backdrop-blur-sm"
+                >
+                  <CardContent className="flex items-center gap-3 p-4">
+                    <div className="rounded-lg bg-secondary p-2 text-[var(--accent-glow)]">
+                      <stat.icon className="size-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">{stat.label}</p>
+                      <p className="font-mono text-lg text-foreground">
+                        {stat.value}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {lastUpdated ? (
+              <p className="font-mono text-[11px] text-muted-foreground">
+                Updated {new Date(lastUpdated).toLocaleTimeString()}
+                {data?.cache
+                  ? ` · Proxmox fetch age ${Math.round(data.cache.ageMs / 1000)}s`
+                  : ""}
+              </p>
+            ) : null}
+
             <section className="space-y-3">
-              <h2 className="font-[family-name:var(--font-display)] text-xl">Nodes</h2>
+              <h2 className="font-[family-name:var(--font-display)] text-xl text-foreground">
+                Nodes
+              </h2>
               <div className="grid gap-4 md:grid-cols-2">
                 {overview?.nodes.map((node) => (
-                  <Card key={node.node} className="border-border/60 bg-card/70 backdrop-blur-sm">
-                    <CardHeader>
-                      <div className="flex items-center justify-between gap-3">
-                        <CardTitle className="font-mono text-lg">{node.node}</CardTitle>
+                  <Card
+                    key={node.node}
+                    className="border-border/60 bg-card/70 backdrop-blur-sm"
+                  >
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <CardTitle className="text-base">{node.node}</CardTitle>
                         <Badge
-                          variant={node.status === "online" ? "default" : "secondary"}
+                          variant={
+                            node.status === "online" ? "default" : "secondary"
+                          }
                           className={
                             node.status === "online"
-                              ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20"
+                              ? "bg-[var(--accent-glow)] text-slate-950"
                               : undefined
                           }
                         >
                           {node.status}
                         </Badge>
                       </div>
-                      <CardDescription>
+                      <CardDescription className="font-mono text-xs">
                         {node.maxcpu} cores · {formatBytesShort(node.maxmem)} RAM
+                        · uptime {formatUptime(node.uptime)}
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       <Meter label="CPU" value={pct(node.cpu)} />
                       <Meter
                         label="Memory"
-                        value={pct(node.mem / Math.max(node.maxmem, 1))}
+                        value={pct(node.maxmem ? node.mem / node.maxmem : 0)}
                       />
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <Cpu className="size-3.5" />
-                        <span className="font-mono">
-                          uptime {Math.floor(node.uptime / 86400)}d{" "}
-                          {Math.floor((node.uptime % 86400) / 3600)}h
-                        </span>
-                      </div>
                     </CardContent>
                   </Card>
                 ))}
-                {!loading && overview?.nodes.length === 0 ? (
+                {!overview?.nodes.length && !loading ? (
                   <p className="text-sm text-muted-foreground">No nodes found.</p>
                 ) : null}
               </div>
             </section>
 
-            <Separator className="bg-border/60" />
-
-            <section className="space-y-3">
-              <h2 className="font-[family-name:var(--font-display)] text-xl">
-                Virtual machines
-              </h2>
-              <GuestTable
-                guests={guestsByType.vms}
-                pending={pending}
-                onPower={runPower}
-              />
-            </section>
-
-            <section className="space-y-3">
-              <h2 className="font-[family-name:var(--font-display)] text-xl">
-                LXC containers
-              </h2>
-              <GuestTable
-                guests={guestsByType.lxcs}
-                pending={pending}
-                onPower={runPower}
-              />
-            </section>
+            {(["vms", "lxcs"] as const).map((key) => {
+              const list = guestsByType[key];
+              const title = key === "vms" ? "Virtual machines" : "LXC containers";
+              return (
+                <section key={key} className="space-y-3">
+                  <h2 className="font-[family-name:var(--font-display)] text-xl text-foreground">
+                    {title}
+                  </h2>
+                  <div className="divide-y divide-border/50 overflow-hidden rounded-xl border border-border/60 bg-card/70 backdrop-blur-sm">
+                    {list.map((guest) => (
+                      <div
+                        key={`${guest.type}-${guest.vmid}`}
+                        className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium">{guest.name}</p>
+                            <Badge variant="secondary" className="font-mono text-[10px]">
+                              {guest.vmid}
+                            </Badge>
+                            <Badge
+                              variant={
+                                guest.status === "running" ? "default" : "secondary"
+                              }
+                              className={
+                                guest.status === "running"
+                                  ? "bg-[var(--accent-glow)] text-slate-950"
+                                  : undefined
+                              }
+                            >
+                              {guest.status}
+                            </Badge>
+                          </div>
+                          <p className="font-mono text-xs text-muted-foreground">
+                            {guest.node} · CPU {pct(guest.cpu)}% ·{" "}
+                            {formatBytesShort(guest.mem)} /{" "}
+                            {formatBytesShort(guest.maxmem)}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {(
+                            [
+                              ["start", "Start"],
+                              ["shutdown", "Shutdown"],
+                              ["reboot", "Reboot"],
+                              ["stop", "Stop"],
+                              ["reset", "Reset"],
+                            ] as const
+                          ).map(([action, label]) => (
+                            <Button
+                              key={action}
+                              size="sm"
+                              variant="outline"
+                              disabled={pending || needsUnlock}
+                              onClick={() => void runPower(guest, action)}
+                            >
+                              {label}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                    {!list.length ? (
+                      <p className="px-4 py-6 text-sm text-muted-foreground">
+                        No guests in this category.
+                      </p>
+                    ) : null}
+                  </div>
+                </section>
+              );
+            })}
           </TabsContent>
 
           <TabsContent value="alexa" className="space-y-4">
             <Card className="border-border/60 bg-card/70 backdrop-blur-sm">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Mic className="size-5 text-[var(--accent-glow)]" />
-                  Try skill utterances
+                  <Mic className="size-4" />
+                  Utterance simulator
                 </CardTitle>
                 <CardDescription>
-                  Simulates Alexa intents against the same handler your skill
-                  endpoint uses. Power actions update the live/demo cluster.
+                  Hits the same intent handler Alexa uses (no Amazon signature).
+                  Requires dashboard unlock in production.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -433,26 +665,23 @@ export function Dashboard() {
                   <Input
                     value={customUtterance}
                     onChange={(e) => setCustomUtterance(e.target.value)}
-                    placeholder="start docker host"
-                    className="font-mono"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void simulateFromUtterance();
-                    }}
+                    placeholder="cluster status"
+                    disabled={needsUnlock}
                   />
                   <Button
                     onClick={() => void simulateFromUtterance()}
-                    disabled={simulating}
+                    disabled={simulating || needsUnlock}
                   >
-                    Speak
+                    {simulating ? "Running…" : "Simulate"}
                   </Button>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {SIMULATIONS.map((item) => (
                     <Button
                       key={item.label}
-                      variant="secondary"
                       size="sm"
-                      disabled={simulating}
+                      variant="secondary"
+                      disabled={simulating || needsUnlock}
                       onClick={() =>
                         void simulate(
                           item.intent,
@@ -465,111 +694,41 @@ export function Dashboard() {
                   ))}
                 </div>
                 {speech ? (
-                  <div className="rounded-xl border border-[var(--accent-glow)]/30 bg-[var(--accent-glow)]/10 px-4 py-3 text-sm leading-relaxed text-foreground animate-in fade-in zoom-in-95">
-                    <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--accent-glow)]">
-                      Alexa says
+                  <>
+                    <Separator />
+                    <p className="rounded-lg bg-secondary/60 px-3 py-2 text-sm leading-relaxed text-foreground">
+                      {speech}
                     </p>
-                    {speech}
-                  </div>
+                  </>
                 ) : null}
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="setup" className="space-y-4">
-            <ServersSetup
-              activeHost={data?.host ?? null}
-              apiBase={data?.apiBase ?? null}
-              mock={data?.mock ?? true}
-              source={data?.source ?? null}
-              serverName={data?.serverName ?? null}
-              onServersChanged={() => void load()}
-            />
+          <TabsContent value="setup">
+            {needsUnlock ? (
+              <p className="text-sm text-muted-foreground">
+                Unlock the dashboard to manage Proxmox servers.
+              </p>
+            ) : (
+              <ServersSetup
+                activeHost={data?.host ?? null}
+                apiBase={data?.apiBase}
+                mock={Boolean(data?.mock)}
+                source={data?.source}
+                serverName={data?.serverName}
+                onServersChanged={() => void load({ fresh: true })}
+              />
+            )}
           </TabsContent>
         </Tabs>
+
+        <footer className="flex items-center gap-2 pb-4 text-xs text-muted-foreground">
+          <HardDrive className="size-3.5" />
+          Stats refresh live while this tab is visible; Proxmox calls are cached
+          server-side (~4s) so multiple polls share one fan-out.
+        </footer>
       </main>
-    </div>
-  );
-}
-
-function GuestTable({
-  guests,
-  pending,
-  onPower,
-}: {
-  guests: GuestStatus[];
-  pending: boolean;
-  onPower: (guest: GuestStatus, action: PowerAction) => void;
-}) {
-  if (guests.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">No guests in this category.</p>
-    );
-  }
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-border/60 bg-card/70 backdrop-blur-sm">
-      <div className="divide-y divide-border/50">
-        {guests.map((guest) => (
-          <div
-            key={`${guest.type}-${guest.vmid}`}
-            className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div className="min-w-0 space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="truncate font-medium">{guest.name}</p>
-                <Badge variant="outline" className="font-mono text-[10px]">
-                  {guest.vmid}
-                </Badge>
-                <Badge
-                  variant="secondary"
-                  className={
-                    guest.status === "running"
-                      ? "bg-emerald-500/15 text-emerald-300"
-                      : undefined
-                  }
-                >
-                  {guest.status}
-                </Badge>
-              </div>
-              <p className="font-mono text-xs text-muted-foreground">
-                {guest.node} · CPU {pct(guest.cpu)}% · RAM{" "}
-                {formatBytesShort(guest.mem)}/{formatBytesShort(guest.maxmem)}
-              </p>
-              {guest.status === "running" ? (
-                <div className="grid max-w-md grid-cols-2 gap-3 pt-1">
-                  <Meter label="CPU" value={pct(guest.cpu)} />
-                  <Meter
-                    label="Memory"
-                    value={pct(guest.mem / Math.max(guest.maxmem, 1))}
-                  />
-                </div>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {(
-                [
-                  ["start", "Start"],
-                  ["shutdown", "Shutdown"],
-                  ["stop", "Stop"],
-                  ["reboot", "Reboot"],
-                  ["reset", "Reset"],
-                ] as const
-              ).map(([action, label]) => (
-                <Button
-                  key={action}
-                  size="sm"
-                  variant="outline"
-                  disabled={pending}
-                  onClick={() => onPower(guest, action)}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
