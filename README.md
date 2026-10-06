@@ -128,10 +128,14 @@ Saved servers live in `/var/lib/voxmox/servers.json` (override with `$VOXMOX_DAT
 ### From environment variables (fallback)
 
 1. In Proxmox, create an API token (Datacenter → Permissions → API Tokens).
-2. Grant the token permission to read cluster/node status and manage guests. A typical least-privilege set:
-   - Path `/` or `/nodes`: `Sys.Audit` (node CPU/RAM/uptime — **required** for live stats)
+2. **Privilege Separation** is enabled by default. Effective rights are
+   **user ∩ token** — even if the user is Administrator / “full access”, the
+   token still needs its own ACL (or turn Privilege Separation **off** on that
+   token). Assign roles to `user@realm!tokenid`, not only to the user:
+   - Path `/` (or `/nodes`): role **Administrator** or **PVEAuditor** (needs `Sys.Audit` for node CPU/RAM/uptime)
    - Path `/vms`: `VM.Audit`, `VM.PowerMgmt` (list guests + power actions)
-   Without `Sys.Audit`, the dashboard can show nodes as online with 0% / 0 B stats.
+   Without token-level `Sys.Audit`, `/version` and cluster listing may work while
+   `/nodes/*/status` returns **403** and the dashboard shows 0% / 0 B stats.
 3. Set in `.env.local` (dev) or `/opt/voxmox/.env` (LXC):
 
 ```env
@@ -190,7 +194,7 @@ https://YOUR_PUBLIC_HOST/api/alexa
 ## Security notes
 
 - Run this service on a host that can reach your Proxmox API; do not expose Proxmox itself publicly.
-- Prefer a least-privilege API token over `root@pam`.
+- Prefer a least-privilege API token over `root@pam`. If you keep Privilege Separation on, remember ACLs must include the **token** (`user@realm!token`), not only the user.
 - Production requests to `/api/alexa` verify Amazon’s signature headers (skipped automatically in development).
 - Tokens saved in the Setup UI are written to `/var/lib/voxmox/servers.json` (mode `0600`) on LXC installs. Keep that path off shared/public storage and out of git.
 - The dashboard power buttons can change guest state — treat the public URL like any privileged control plane.
