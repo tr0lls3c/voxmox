@@ -176,11 +176,13 @@ export function ServersSetup({
     setError(null);
     setMessage(null);
     setRemovingId(server.id);
+    // Drop from the list immediately so a slow cluster refresh cannot leave a stale row.
     setServers((prev) => prev.filter((item) => item.id !== server.id));
     if (editingId === server.id) cancelForm();
     try {
       const res = await fetch(`/api/servers/${server.id}`, { method: "DELETE" });
       const json = await res.json().catch(() => ({}));
+      // 404 means it is already gone — treat as success.
       if (!res.ok && res.status !== 404) {
         throw new Error(json.error || "Failed to remove server");
       }
@@ -492,9 +494,10 @@ export function ServersSetup({
               account that owns the token (the part before{" "}
               <code className="font-mono">!</code>) and click{" "}
               <strong className="text-foreground">Repair token access</strong>.
-              Voxmox will grant Administrator on{" "}
-              <code className="font-mono">/</code> to the token via the Proxmox
-              API.
+              Voxmox will grant{" "}
+              <code className="font-mono">PVEAuditor,PVEVMAdmin</code> on{" "}
+              <code className="font-mono">/</code> to the token (falling back to
+              Administrator if needed).
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1.5 text-sm sm:col-span-2">
