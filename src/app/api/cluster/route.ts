@@ -1,16 +1,33 @@
 import {
-  getClusterOverview,
+  getClusterOverviewWithMeta,
   getProxmoxConfig,
   proxmoxApiBase,
 } from "@/lib/proxmox";
+import { requireDashboardAuth } from "@/lib/security/dashboard-auth";
+import { clientKey, rateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
+  const limited = rateLimit(clientKey(request, "cluster"), {
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
+  const url = new URL(request.url);
+  const force =
+    url.searchParams.get("fresh") === "1" ||
+    url.searchParams.get("force") === "1";
+
   try {
     const config = await getProxmoxConfig();
-    const overview = await getClusterOverview();
+    const { overview, cached, fetchedAt, ageMs } =
+      await getClusterOverviewWithMeta(null, { force });
     const host = config.host || null;
     return Response.json({
       configured: !config.mock || Boolean(config.host),
@@ -21,6 +38,12 @@ export async function GET() {
       source: config.source,
       serverName: config.serverName ?? null,
       overview,
+      cache: {
+        hit: cached,
+        fetchedAt,
+        ageMs,
+        ttlMs: 4_000,
+      },
     });
   } catch (error) {
     console.error("Cluster API error:", error);
