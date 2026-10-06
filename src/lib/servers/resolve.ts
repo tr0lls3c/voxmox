@@ -8,12 +8,6 @@ function envFlag(name: string, fallback = false): boolean {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
-function applyTls(rejectUnauthorized: boolean): void {
-  if (!rejectUnauthorized && process.env.NODE_TLS_REJECT_UNAUTHORIZED !== "0") {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-  }
-}
-
 function fromEnv(): ProxmoxConfig {
   const host = normalizeProxmoxHost(process.env.PROXMOX_HOST ?? "");
   const tokenId = process.env.PROXMOX_TOKEN_ID ?? "";
@@ -22,7 +16,6 @@ function fromEnv(): ProxmoxConfig {
   const forceMock = envFlag("PROXMOX_MOCK", false);
   const rejectUnauthorized = !envFlag("PROXMOX_ALLOW_SELF_SIGNED", true);
   const mock = forceMock || !host || !tokenId || !tokenSecret;
-  applyTls(rejectUnauthorized);
   return {
     host,
     tokenId,
@@ -43,7 +36,6 @@ export async function resolveProxmoxConfig(
 
   if (stored?.enabled && stored.host && stored.tokenId && stored.tokenSecret) {
     const rejectUnauthorized = !stored.allowSelfSigned;
-    applyTls(rejectUnauthorized);
     return {
       host: normalizeProxmoxHost(stored.host),
       tokenId: stored.tokenId,
