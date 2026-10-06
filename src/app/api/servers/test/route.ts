@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { getServerById } from "@/lib/servers";
 import { testProxmoxConnection } from "@/lib/proxmox/client";
+import { requireDashboardAuth } from "@/lib/security/dashboard-auth";
+import { clientKey, rateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +25,15 @@ const testSchema = z
   );
 
 export async function POST(request: Request) {
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
+  const limited = rateLimit(clientKey(request, "servers-test"), {
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   let json: unknown;
   try {
     json = await request.json();
