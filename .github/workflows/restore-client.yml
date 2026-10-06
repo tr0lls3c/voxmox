@@ -1,9 +1,9 @@
-name: restore-client
+name: restore-blobs
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'scripts/.restore/client.ts.zb64.part*'
+      - 'scripts/.restore/**'
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -11,23 +11,58 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Assemble and decompress client.ts
+      - name: Assemble compressed blobs
         run: |
           python3 - <<'PY'
-          import base64, zlib, pathlib
-          parts = sorted(pathlib.Path('scripts/.restore').glob('client.ts.zb64.part*'))
-          zb64 = ''.join(p.read_text().strip() for p in parts)
-          data = zlib.decompress(base64.b64decode(zb64))
-          out = pathlib.Path('src/lib/proxmox/client.ts')
-          out.write_bytes(data)
-          print('parts', [p.name for p in parts])
-          print('wrote', len(data), 'bytes to', out)
+          import base64, zlib, pathlib, re, hashlib
+          root = pathlib.Path('scripts/.restore')
+          groups = {}
+          for p in sorted(root.glob('*.zb64.part*')):
+              m = re.match(r'(.+)\.zb64\.part(\d+)$', p.name)
+              if not m:
+                  continue
+              groups.setdefault(m.group(1), []).append((int(m.group(2)), p))
+          MAP = {
+            'client.ts': 'src/lib/proxmox/client.ts',
+            'src__components__dashboard.tsx': 'src/components/dashboard.tsx',
+            'src__components__servers-setup.tsx': 'src/components/servers-setup.tsx',
+            'scripts__lxc__install-voxmox.sh': 'scripts/lxc/install-voxmox.sh',
+            'scripts__voxmox-lxc.sh': 'scripts/voxmox-lxc.sh',
+            'package-lock.json': 'package-lock.json',
+          }
+          changed = []
+          for safe, parts in groups.items():
+              parts = [p for _, p in sorted(parts)]
+              dest = MAP.get(safe)
+              if not dest:
+                  print('skip unknown', safe)
+                  continue
+              zb64 = ''.join(p.read_text().strip() for p in parts)
+              data = zlib.decompress(base64.b64decode(zb64))
+              out = pathlib.Path(dest)
+              out.parent.mkdir(parents=True, exist_ok=True)
+              if out.exists() and out.read_bytes() == data:
+                  print('unchanged', dest, len(data), hashlib.sha256(data).hexdigest()[:12])
+                  continue
+              out.write_bytes(data)
+              changed.append(dest)
+              print('wrote', dest, len(data), hashlib.sha256(data).hexdigest()[:12])
+          pathlib.Path('/tmp/changed.txt').write_text('\n'.join(changed))
+          print('changed_count', len(changed))
           PY
-      - name: Commit restored client.ts
+      - name: Commit restored files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/proxmox/client.ts
-          git diff --cached --quiet && echo "No changes" && exit 0
-          git commit -m "prod: SSE cluster stream + proxmox auth/client hardening"
+          if [ ! -s /tmp/changed.txt ]; then echo "No changes"; exit 0; fi
+          while IFS= read -r f; do git add "$f"; done < /tmp/changed.txt
+          git diff --cached --quiet && echo "No staged changes" && exit 0
+          if grep -qx 'package-lock.json' /tmp/changed.txt && [ "$(wc -l < /tmp/changed.txt)" -eq 1 ]; then
+            msg="prod: refresh package-lock.json"
+          elif grep -qE 'dashboard|servers-setup|lxc' /tmp/changed.txt; then
+            msg="prod: dashboard SSE client + LXC scripts"
+          else
+            msg="prod: SSE cluster stream + proxmox auth/client hardening"
+          fi
+          git commit -m "$msg"
           git push
