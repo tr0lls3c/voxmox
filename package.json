@@ -4,8 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev --webpack -H 0.0.0.0 -p 43127",
+    "dev:dashboard": "VOXMOX_SERVICE_MODE=dashboard next dev --webpack -H 0.0.0.0 -p 43127",
+    "dev:api": "VOXMOX_SERVICE_MODE=api next dev --webpack -H 0.0.0.0 -p 43128",
     "build": "next build",
     "start": "next start -H 0.0.0.0 -p 43127",
+    "start:dashboard": "VOXMOX_SERVICE_MODE=dashboard next start -H 0.0.0.0 -p 43127",
+    "start:api": "VOXMOX_SERVICE_MODE=api next start -H 0.0.0.0 -p 43128",
     "lint": "eslint"
   },
   "dependencies": {

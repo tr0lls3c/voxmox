@@ -1,0 +1,27 @@
+[Unit]
+Description=Voxmox Alexa API
+Documentation=https://github.com/tr0lls3c/voxmox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=__APP_DIR__
+Environment=NODE_ENV=production
+Environment=PORT=__API_PORT__
+Environment=VOXMOX_SERVICE_MODE=api
+Environment=VOXMOX_DATA_DIR=/var/lib/voxmox
+EnvironmentFile=-__APP_DIR__/.env
+# Force mode after EnvironmentFile so .env cannot accidentally switch roles.
+ExecStart=/usr/bin/env VOXMOX_SERVICE_MODE=api __APP_DIR__/node_modules/.bin/next start -H 0.0.0.0 -p __API_PORT__
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=30
+LimitNOFILE=65535
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

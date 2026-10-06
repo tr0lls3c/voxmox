@@ -1,5 +1,5 @@
 [Unit]
-Description=Voxmox Alexa + Proxmox dashboard
+Description=Voxmox combined (dashboard + Alexa on one port — legacy/dev)
 Documentation=https://github.com/tr0lls3c/voxmox
 After=network-online.target
 Wants=network-online.target
@@ -11,13 +11,13 @@ Group=__APP_USER__
 WorkingDirectory=__APP_DIR__
 Environment=NODE_ENV=production
 Environment=PORT=__APP_PORT__
+Environment=VOXMOX_SERVICE_MODE=all
 # Durable settings path (servers.json). Survives app updates under __APP_DIR__.
 Environment=VOXMOX_DATA_DIR=/var/lib/voxmox
 # Do not set Unix HOSTNAME here — that is the machine name.
 # Bind explicitly to all interfaces via ExecStart -H 0.0.0.0.
 EnvironmentFile=-__APP_DIR__/.env
-# Call next directly (npx adds several seconds of startup overhead).
-ExecStart=__APP_DIR__/node_modules/.bin/next start -H 0.0.0.0 -p __APP_PORT__
+ExecStart=/usr/bin/env VOXMOX_SERVICE_MODE=all __APP_DIR__/node_modules/.bin/next start -H 0.0.0.0 -p __APP_PORT__
 Restart=on-failure
 RestartSec=3
 TimeoutStartSec=30
