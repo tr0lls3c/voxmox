@@ -3,6 +3,7 @@ import { accessSync, constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { normalizeProxmoxHost } from "@/lib/proxmox/client";
+import { openSecret, sealSecret } from "@/lib/security/secrets";
 import type {
   ProxmoxServer,
   ProxmoxServerPublic,
@@ -127,6 +128,8 @@ function parseConfig(raw: string): ServersConfig {
     servers: parsed.servers.map((server) => ({
       ...server,
       host: normalizeHost(server.host),
+      tokenSecret: openSecret(server.tokenSecret) ?? server.tokenSecret,
+      authPassword: openSecret(server.authPassword),
       allowSelfSigned: server.allowSelfSigned !== false,
       enabled: server.enabled !== false,
     })),
@@ -150,9 +153,24 @@ async function writeServersConfig(config: ServersConfig): Promise<void> {
   await ensureDataDir();
   const target = getServersConfigPath();
   const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  const payload = `${JSON.stringify(config, null, 2)}\n`;
+  // Encrypt secrets at rest; plaintext migrates on the next write when a key exists.
+  const sealed: ServersConfig = {
+    activeServerId: config.activeServerId,
+    servers: config.servers.map((server) => ({
+      ...server,
+      tokenSecret: sealSecret(server.tokenSecret) ?? server.tokenSecret,
+      authPassword: sealSecret(server.authPassword),
+    })),
+  };
+  const payload = `${JSON.stringify(sealed, null, 2)}\n`;
   await writeFile(temp, payload, { mode: 0o600 });
   await rename(temp, target);
+  try {
+    const { chmod } = await import("node:fs/promises");
+    await chmod(target, 0o600);
+  } catch {
+    // Best-effort on platforms that ignore mode.
+  }
 }
 
 export function toPublicServer(
