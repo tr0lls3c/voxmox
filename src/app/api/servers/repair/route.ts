@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { getServerById, updateServer } from "@/lib/servers";
 import { repairProxmoxTokenAccess } from "@/lib/proxmox/client";
+import { requireDashboardAuth } from "@/lib/security/dashboard-auth";
+import { clientKey, rateLimit } from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +26,15 @@ const repairSchema = z
   );
 
 export async function POST(request: Request) {
+  const denied = requireDashboardAuth(request);
+  if (denied) return denied;
+
+  const limited = rateLimit(clientKey(request, "servers-repair"), {
+    limit: 10,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   let json: unknown;
   try {
     json = await request.json();
