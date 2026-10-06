@@ -1,0 +1,33 @@
+name: materialize-updater
+on:
+  push:
+    paths:
+      - '.github/artifacts/update.gz.b64'
+      - '.github/workflows/materialize-updater.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode full scripts/lxc/update
+        run: |
+          mkdir -p scripts/lxc
+          python3 - <<'PY'
+          import base64, gzip, pathlib
+          raw = pathlib.Path(".github/artifacts/update.gz.b64").read_text().strip()
+          data = gzip.decompress(base64.b64decode(raw))
+          assert b"self_update_from_app" in data
+          assert b"expanding restore-parts" in data or b"restore-parts" in data
+          assert b"Temporary bootstrap" not in data.splitlines()[1] if len(data.splitlines())>1 else True
+          pathlib.Path("scripts/lxc/update").write_bytes(data)
+          pathlib.Path("scripts/lxc/update").chmod(0o755)
+          print("wrote", len(data), "bytes")
+          PY
+      - name: Commit materialized updater
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Fix updater: ship full scripts/lxc/update (no self-overwrite stub)"
+          file_pattern: scripts/lxc/update
