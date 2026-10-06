@@ -74,7 +74,7 @@ bash scripts/voxmox-lxc.sh
 | Port | `43127` (bound to `0.0.0.0` — all LXC interfaces) |
 | Service | `systemctl status voxmox` |
 
-You'll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.
+You’ll be prompted for storage, bridge, IP, and Proxmox API URL/token. Leave the GitHub PAT blank for a public repo.
 
 ### Non-interactive example
 
@@ -138,9 +138,10 @@ Saved servers live in `/var/lib/voxmox/servers.json` (override with `$VOXMOX_DAT
 2. If the dashboard shows **403 Sys.Audit** / empty node stats, open **Setup**,
    enter the **user password** for the account that owns the token, and click
    **Repair token access**. Voxmox logs in as that user and grants the token
-   Administrator on `/` (this is the reliable fix when Privilege Separation is
-   on). You can also disable Privilege Separation on the token in Proxmox, or run:
-   `pveum acl modify / -token 'user@realm!token' -role Administrator`
+   `PVEAuditor,PVEVMAdmin` on `/` (falls back to `Administrator` if needed).
+   You can also disable Privilege Separation on the token in Proxmox, or run:
+   `pveum acl modify / -token 'user@realm!token' -role PVEAuditor` and
+   `pveum acl modify / -token 'user@realm!token' -role PVEVMAdmin`
 3. Set in `.env.local` (dev) or `/opt/voxmox/.env` (LXC):
 
 ```env
@@ -151,11 +152,10 @@ PROXMOX_TOKEN_SECRET=your-secret
 # PROXMOX_AUTH_PASSWORD=your-user-password
 ```
 
-4. For typical self-signed Proxmox TLS certificates, also set:
-
-```env
-NODE_TLS_REJECT_UNAUTHORIZED=0
-```
+4. For typical self-signed Proxmox TLS certificates, set
+   `PROXMOX_ALLOW_SELF_SIGNED=true` (default) or enable **Allow self-signed**
+   on the saved server. Voxmox relaxes TLS per outbound Proxmox request — you do
+   **not** need `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 
 Restart the app after changing env vars (`systemctl restart voxmox` in the LXC). Env credentials are used only when no enabled saved server is active.
 
@@ -163,7 +163,7 @@ Restart the app after changing env vars (`systemctl restart voxmox` in the LXC).
 
 1. Create a custom Alexa skill in the [Alexa Developer Console](https://developer.amazon.com/alexa/console/ask).
 2. Import the interaction model from `alexa/interaction-model.json` (invocation name: **vox mox**).
-   Guest/node names use Alexa's free-form `AMAZON.SearchQuery` slot, so you do **not** need to edit the skill when you add VMs, LXCs, or nodes. Power actions are separate intents (`StartGuestIntent`, `StopGuestIntent`, etc.) because Alexa forbids mixing a phrase slot with other slots.
+   Guest/node names use Alexa’s free-form `AMAZON.SearchQuery` slot, so you do **not** need to edit the skill when you add VMs, LXCs, or nodes. Power actions are separate intents (`StartGuestIntent`, `StopGuestIntent`, etc.) because Alexa forbids mixing a phrase slot with other slots.
 3. Expose this app on a public HTTPS URL (Cloudflare Tunnel, Tailscale Funnel, Caddy, nginx, etc.).
 4. Set the skill endpoint to:
 
@@ -171,17 +171,17 @@ Restart the app after changing env vars (`systemctl restart voxmox` in the LXC).
 https://YOUR_PUBLIC_HOST/api/alexa
 ```
 
-5. Optionally set `ALEXA_SKILL_ID` to your skill's application ID.
+5. Optionally set `ALEXA_SKILL_ID` to your skill’s application ID.
 
 ### Example phrases
 
-- "Alexa, open vox mox"
-- "Alexa, ask vox mox for cluster status"
-- "Alexa, ask vox mox for node stats"
-- "Alexa, ask vox mox for stats for docker host"
-- "Alexa, ask vox mox to start pihole"
-- "Alexa, ask vox mox to shut down windows lab"
-- "Alexa, ask vox mox for performance"
+- “Alexa, open vox mox”
+- “Alexa, ask vox mox for cluster status”
+- “Alexa, ask vox mox for node stats”
+- “Alexa, ask vox mox for stats for docker host”
+- “Alexa, ask vox mox to start pihole”
+- “Alexa, ask vox mox to shut down windows lab”
+- “Alexa, ask vox mox for performance”
 
 ## API surface
 
@@ -190,6 +190,7 @@ https://YOUR_PUBLIC_HOST/api/alexa
 | `POST /api/alexa` | Alexa skill endpoint |
 | `POST /api/alexa/simulate` | Dashboard simulator (`{ intent, slots }`) |
 | `GET /api/cluster` | Cluster overview JSON |
+| `GET /api/cluster/stream` | SSE live overview (shared ~4s cache) |
 | `POST /api/power` | Power action (`{ vmid\|name, type?, action }`) |
 | `GET /api/servers` | List saved Proxmox servers (secrets redacted) |
 | `POST /api/servers` | Add a server |
@@ -202,11 +203,13 @@ https://YOUR_PUBLIC_HOST/api/alexa
 
 - Run this service on a host that can reach your Proxmox API; do not expose Proxmox itself publicly.
 - Set `VOXMOX_DASHBOARD_SECRET` to lock Setup / power / cluster APIs behind an unlock cookie (LXC install/update generates one at `/etc/voxmox/dashboard.secret`). Alexa `/api/alexa` stays signature-verified and does not use this secret.
-- Prefer a least-privilege API token over `root@pam`. If you keep Privilege Separation on, remember ACLs must include the **token** (`user@realm!token`), not only the user.
+- Prefer a least-privilege API token over `root@pam`. Repair grants `PVEAuditor,PVEVMAdmin` first (Administrator only as fallback). If you keep Privilege Separation on, ACLs must include the **token** (`user@realm!token`), not only the user.
 - Production always verifies Alexa signatures (`ALEXA_SKIP_SIGNATURE_VALIDATION` is ignored) and requires `ALEXA_SKILL_ID`.
 - Tokens saved in the Setup UI are written to `/var/lib/voxmox/servers.json` (mode `0600`) on LXC installs. Keep that path off shared/public storage and out of git.
+- Set `VOXMOX_SECRETS_KEY` (64-char hex or passphrase) to encrypt `tokenSecret` / `authPassword` at rest in `servers.json`. When unset, a key is derived from `VOXMOX_DASHBOARD_SECRET`; without either, secrets stay plaintext (dev) and production logs a one-time warning on write. Existing plaintext values are encrypted on the next save.
+- Self-signed Proxmox TLS is handled per request (`PROXMOX_ALLOW_SELF_SIGNED` / server flag). Do not set global `NODE_TLS_REJECT_UNAUTHORIZED=0`.
 - The dashboard power buttons can change guest state — treat the public URL like any privileged control plane.
-- Cluster stats are live-polled in the UI (~5s while visible) but Proxmox calls are coalesced with a ~4s server cache + singleflight so Alexa and multiple tabs do not multiply API load.
+- Cluster stats stream over SSE while the Cluster tab is visible (soft-poll fallback). Proxmox calls are coalesced with a ~4s server cache + singleflight so Alexa and multiple tabs do not multiply API load.
 
 ## Scripts
 
