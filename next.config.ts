@@ -25,6 +25,8 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Keep undici's Agent/dispatcher available for per-request Proxmox TLS.
+  serverExternalPackages: ["undici"],
   // Allow Cloud Agent / proxy hosts to load the Turbopack/Webpack HMR client.
   allowedDevOrigins: [
     "127.0.0.1",
