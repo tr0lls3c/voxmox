@@ -28,6 +28,8 @@ APP="Voxmox"
 APP_DIR="/opt/voxmox"
 APP_USER="voxmox"
 APP_PORT="${APP_PORT:-43127}"
+API_PORT="${API_PORT:-43128}"
+VOXMOX_SPLIT="${VOXMOX_SPLIT:-1}"
 GITHUB_REPO="${GITHUB_REPO:-tr0lls3c/voxmox}"
 DEFAULT_GIT_URL="${VOXMOX_GIT_URL:-https://github.com/${GITHUB_REPO}.git}"
 RAW_BASE="${VOXMOX_RAW_BASE:-https://raw.githubusercontent.com/${GITHUB_REPO}/main}"
@@ -192,7 +194,7 @@ repo_root_from_script() {
 has_local_helpers() {
   local dir
   dir="$(script_dir)" || return 1
-  [[ -f "$dir/lxc/install-voxmox.sh" && -f "$dir/lxc/update" && -f "$dir/lxc/voxmox.service" ]]
+  [[ -f "$dir/lxc/install-voxmox.sh" && -f "$dir/lxc/update" && -f "$dir/lxc/voxmox-dashboard.service" && -f "$dir/lxc/voxmox-api.service" ]]
 }
 
 # Copy a helper file into place from the local checkout, or download from GitHub.
@@ -234,7 +236,7 @@ pick_debian_template() {
   found="$(
     pveam available -section system 2>/dev/null |
       awk '{print $2}' |
-      grep -E 'debian-12-standard_.*_amd64\.tar\.(zst|xz)$' |
+      grep -E 'debian-12-standard_.*_amd64\\.tar\\.(zst|xz)$' |
       sort -V |
       tail -n1
   )"
@@ -242,7 +244,7 @@ pick_debian_template() {
     found="$(
       pveam available -section system 2>/dev/null |
         awk '{print $2}' |
-        grep -E 'debian-13-standard_.*_amd64\.tar\.(zst|xz)$' |
+        grep -E 'debian-13-standard_.*_amd64\\.tar\\.(zst|xz)$' |
         sort -V |
         tail -n1
     )"
@@ -426,10 +428,14 @@ install_inside() {
   tmpdir="$(mktemp -d)"
 
   stage_helper_file "install-voxmox.sh" "$tmpdir/install-voxmox.sh"
+  stage_helper_file "voxmox-dashboard.service" "$tmpdir/voxmox-dashboard.service"
+  stage_helper_file "voxmox-api.service" "$tmpdir/voxmox-api.service"
   stage_helper_file "voxmox.service" "$tmpdir/voxmox.service"
   stage_helper_file "update" "$tmpdir/voxmox-update.sh"
 
   pct push "$CTID" "$tmpdir/install-voxmox.sh" /tmp/install-voxmox.sh
+  pct push "$CTID" "$tmpdir/voxmox-dashboard.service" /tmp/voxmox-dashboard.service
+  pct push "$CTID" "$tmpdir/voxmox-api.service" /tmp/voxmox-api.service
   pct push "$CTID" "$tmpdir/voxmox.service" /tmp/voxmox.service
   pct push "$CTID" "$tmpdir/voxmox-update.sh" /tmp/voxmox-update.sh
   pct exec "$CTID" -- chmod +x /tmp/install-voxmox.sh /tmp/voxmox-update.sh
@@ -444,6 +450,9 @@ install_inside() {
     APP_DIR="$APP_DIR" \
     APP_USER="$APP_USER" \
     APP_PORT="$APP_PORT" \
+    DASHBOARD_PORT="$APP_PORT" \
+    API_PORT="$API_PORT" \
+    VOXMOX_SPLIT="$VOXMOX_SPLIT" \
     NODE_MAJOR="$NODE_MAJOR" \
     GIT_URL="$DEFAULT_GIT_URL" \
     GIT_BRANCH="$GIT_BRANCH" \
@@ -469,9 +478,9 @@ print_summary() {
   echo -e "  ${BOLD}CTID:${CL}      ${CTID}"
   echo -e "  ${BOLD}Hostname:${CL}  ${HOSTNAME}"
   echo -e "  ${BOLD}Dashboard:${CL} http://${ip}:${APP_PORT}"
-  echo -e "  ${BOLD}Alexa URL:${CL} http://${ip}:${APP_PORT}/api/alexa"
+  echo -e "  ${BOLD}Alexa URL:${CL} http://${ip}:${API_PORT}/api/alexa"
   echo -e "  ${BOLD}App dir:${CL}   ${APP_DIR}"
-  echo -e "  ${BOLD}Service:${CL}   systemctl status voxmox   (inside CT)"
+  echo -e "  ${BOLD}Services:${CL}  systemctl status voxmox-dashboard voxmox-api   (inside CT)"
   if [[ "${GENERATED_PASSWORD:-0}" == "1" ]]; then
     echo -e "  ${BOLD}Root PW:${CL}   ${PASSWORD}"
   fi
