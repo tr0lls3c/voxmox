@@ -1,4 +1,5 @@
 name: materialize-updater
+# re-trigger materialize for full updater
 on:
   push:
     paths:
