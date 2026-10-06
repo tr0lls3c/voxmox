@@ -1,4 +1,5 @@
 export {
+  ensureNodeAccess,
   findGuest,
   getClusterOverview,
   getNodeStatus,
@@ -7,6 +8,7 @@ export {
   normalizeProxmoxHost,
   powerGuest,
   proxmoxApiBase,
+  repairProxmoxTokenAccess,
   testProxmoxConnection,
 } from "./client";
 export type { ProxmoxConfig, ResolvedProxmoxConfig } from "./client";

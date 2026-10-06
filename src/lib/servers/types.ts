@@ -5,6 +5,11 @@ export interface ProxmoxServer {
   host: string;
   tokenId: string;
   tokenSecret: string;
+  /**
+   * Optional password for the token’s user (the part before `!`).
+   * Used to auto-grant token ACLs when privilege separation blocks Sys.Audit.
+   */
+  authPassword?: string;
   allowSelfSigned: boolean;
   enabled: boolean;
   createdAt: string;
@@ -23,6 +28,8 @@ export interface ProxmoxServerPublic {
   tokenId: string;
   /** True when a token secret is stored (value is never returned). */
   hasTokenSecret: boolean;
+  /** True when a user password is stored for ACL repair (value is never returned). */
+  hasAuthPassword: boolean;
   allowSelfSigned: boolean;
   enabled: boolean;
   isActive: boolean;
@@ -35,6 +42,8 @@ export interface ServerInput {
   host: string;
   tokenId: string;
   tokenSecret?: string;
+  /** Pass empty string to clear a stored password. */
+  authPassword?: string;
   allowSelfSigned?: boolean;
   enabled?: boolean;
   setActive?: boolean;
